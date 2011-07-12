@@ -1,0 +1,23 @@
+# Compiled source #
+###################
+*.pyc
+*.bak
+
+# Logs and databases #
+######################
+*.log
+*.sql
+*.sqlite
+
+# IDE files #
+#############
+*.idea
+*.project
+*.pydevproject
+*.iml
+
+# OS files #
+############
+.DS_Store
+*.*~
+.#*
