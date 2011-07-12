@@ -22,5 +22,5 @@ handlers:
   login: admin
 
 - url: /.*
-  script: api.py
+  script: app.py
 
