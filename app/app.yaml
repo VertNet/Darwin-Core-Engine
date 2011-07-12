@@ -1,0 +1,26 @@
+application: vert-net
+version: dev
+runtime: python
+api_version: 1
+
+builtins:
+- datastore_admin: on
+- remote_api: on
+- deferred: on
+
+handlers:
+
+- url: /api/.*
+  script: api.py
+  
+- url: /admin/.*
+  script: api.py
+  login: admin
+
+- url: /mapreduce(/.*)?
+  script: mapreduce/main.py
+  login: admin
+
+- url: /.*
+  script: api.py
+

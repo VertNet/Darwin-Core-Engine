@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block headtitle %}Collaborative data publishing{% endblock %}
+{% block head %}
+  <link rel="stylesheet" media="screen" href="/static/css/index.css" />
+{% endblock %}
+{% block body %}
+    <section class="mission-section">
+      <p>Open access to biodiversity data, integration with existing applications, and a sustainable infrastructure that performs at scale. Through a strategic partnership with data publishers worldwide, VertNet will provide a new platform that transforms the use of biodiversity data for scientific research, conservation, and education. </p>
+    </section>
+
+    <section id="index">
+      <a href="http://slides.html5rocks.com">
+        <div class="app">
+          <div class="appcontent">
+            <h2><span>Fish</span> FishNet 2</h2>
+            <img src="/static/images/html5rocks-presentation.png" width="70" height="70" />
+            <p class="desc">Watch the slideshow that lets you play with HTML5 features.</p>
+          </div>
+        </div>
+      </a>
+      <a href="http://playground.html5rocks.com">
+        <div class="app">
+          <div class="appcontent">
+            <h2><span>Herps</span> HerpNET</h2>
+            <img src="/static/images/html5rocks-playground.png" width="70" height="70" />
+            <p class="desc">Jump headfirst into HTML5 by experimenting with each API.</p>
+          </div>
+        </div>
+      </a>
+      <a href="http://studio.html5rocks.com">
+        <div class="app">
+          <div class="appcontent">
+            <h2><span>Mammals</span> MaNIS</h2>
+            <img src="/static/images/html5rocks-studio.png" width="70" height="70" />
+            <p class="desc">A showroom of content that you can reuse in your own site.</p>
+          </div>
+        </div>
+      </a>
+      <a href="/tutorials/">
+        <div class="app">
+          <div class="appcontent">
+            <h2><span>Birds </span> ORNIS</h2>
+            <img src="/static/images/html5rocks-tutorials.png" width="70" height="70" />
+            <p class="desc">Take a guided tour through code that uses HTML5 features.</p>
+          </div>
+        </div>
+      </a>
+    </section>
+{% endblock %}
