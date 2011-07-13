@@ -34,10 +34,9 @@ if version_tuple < (2, 4):
                    'version 2.5 or greater.\n' % version_tuple)
   sys.exit(1)
 
-DIR_PATH = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
+_file_ = os.path.join(os.environ['GOOGLE_APP_ENGINE'], 'appcfg.py')
+DIR_PATH = os.path.abspath(os.path.dirname(os.path.realpath(_file_)))
 SCRIPT_DIR = os.path.join(DIR_PATH, 'google', 'appengine', 'tools')
-
-
 
 EXTRA_PATHS = [
   DIR_PATH,
