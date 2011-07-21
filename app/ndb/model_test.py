@@ -9,6 +9,7 @@ import unittest
 
 from google.appengine.api import datastore_errors
 from google.appengine.api import datastore_types
+from google.appengine.api import memcache
 from google.appengine.api import namespace_manager
 from google.appengine.api import users
 from google.appengine.datastore import entity_pb
@@ -1263,6 +1264,7 @@ class ModelTests(test_utils.DatastoreTest):
     a = Address(street='1600 Amphitheatre')
     p.address = a
     p.address.city = 'Mountain View'
+    self.assertEqual(p.address.key, None)
     self.assertEqual(Person.name._get_value(p), 'Google')
     self.assertEqual(p.name, 'Google')
     self.assertEqual(Person.address._get_value(p), a)
@@ -1276,6 +1278,7 @@ class ModelTests(test_utils.DatastoreTest):
     # be understood.
     Person.address._compressed = True
     p = Person._from_pb(pb)
+    self.assertEqual(p.address.key, None)
     self.assertEqual(p.name, 'Google')
     self.assertEqual(p.address.street, '1600 Amphitheatre')
     self.assertEqual(p.address.city, 'Mountain View')
@@ -1287,6 +1290,7 @@ class ModelTests(test_utils.DatastoreTest):
 
     Person.address._compressed = False
     p = Person._from_pb(pb)
+    self.assertEqual(p.address.key, None)
 
     # Now try with an empty address
     p = Person()
@@ -1311,7 +1315,7 @@ class ModelTests(test_utils.DatastoreTest):
     p.address = Address(street='1600 Amphitheatre', city='Mountain View')
     p.put()
 
-    # Putting and getting to test compression and deserialization.
+    # To test compression and deserialization with untouched properties.
     p = k.get()
     p.put()
 
@@ -1319,6 +1323,9 @@ class ModelTests(test_utils.DatastoreTest):
     self.assertEqual(p.name, 'Google')
     self.assertEqual(p.address.street, '1600 Amphitheatre')
     self.assertEqual(p.address.city, 'Mountain View')
+
+    # To test compression and deserialization after properties were accessed.
+    p.put()
 
   def testLocalStructuredPropertyRepeated(self):
     class Address(model.Model):
@@ -1335,7 +1342,7 @@ class ModelTests(test_utils.DatastoreTest):
     p.address.append(Address(street='Webb crater', city='Moon'))
     p.put()
 
-    # Putting and getting to test compression and deserialization.
+    # To test compression and deserialization with untouched properties.
     p = k.get()
     p.put()
 
@@ -1345,6 +1352,9 @@ class ModelTests(test_utils.DatastoreTest):
     self.assertEqual(p.address[0].city, 'Mountain View')
     self.assertEqual(p.address[1].street, 'Webb crater')
     self.assertEqual(p.address[1].city, 'Moon')
+
+    # To test compression and deserialization after properties were accessed.
+    p.put()
 
   def testLocalStructuredPropertyRepeatedCompressed(self):
     class Address(model.Model):
@@ -1362,7 +1372,7 @@ class ModelTests(test_utils.DatastoreTest):
     p.address.append(Address(street='Webb crater', city='Moon'))
     p.put()
 
-    # Putting and getting to test compression and deserialization.
+    # To test compression and deserialization with untouched properties.
     p = k.get()
     p.put()
 
@@ -1372,6 +1382,9 @@ class ModelTests(test_utils.DatastoreTest):
     self.assertEqual(p.address[0].city, 'Mountain View')
     self.assertEqual(p.address[1].street, 'Webb crater')
     self.assertEqual(p.address[1].city, 'Moon')
+
+    # To test compression and deserialization after properties were accessed.
+    p.put()
 
   def testLocalStructuredPropertyRepeatedRepeated(self):
     class Inner(model.Model):
@@ -1845,6 +1858,198 @@ class ModelTests(test_utils.DatastoreTest):
     self.assertEqual(key2.get(), None)
     self.assertEqual(key3.get(), None)
 
+  def testContextOptions(self):
+    ctx = tasklets.get_context()
+    ctx.set_cache_policy(True)
+    ctx.set_memcache_policy(True)
+    ctx.set_memcache_timeout_policy(0)
+    # Create an entity and put it in the caches.
+    class MyModel(model.Model):
+      name = model.StringProperty()
+    key = model.Key(MyModel, 'yo')
+    ent = MyModel(key=key, name='yo')
+    ent.put()
+    key.get(use_cache=False)  # Write to memcache.
+    # Verify that it is in both caches.
+    self.assertTrue(ctx._cache[key] is ent)
+    self.assertEqual(memcache.get(ctx._memcache_prefix + key.urlsafe()),
+                     ent._to_pb())
+    # Get it bypassing the in-process cache.
+    ent_copy = key.get(use_cache=False)
+    self.assertEqual(ent_copy, ent)
+    self.assertFalse(ent_copy is ent)
+    # Put it bypassing both caches.
+    ent_copy.name = 'yoyo'
+    ent_copy.put(use_cache=False, use_memcache=False)
+    # Get it from the in-process cache.
+    ent2 = key.get()
+    self.assertTrue(ent2 is ent)
+    self.assertEqual(ent2.name, 'yo')
+    self.assertEqual(ent_copy.name, 'yoyo')  # Should not have changed.
+    # Get it from memcache.
+    ent3 = key.get(use_cache=False)
+    self.assertFalse(ent3 is ent)
+    self.assertFalse(ent3 is ent2)
+    self.assertEqual(ent3.name, 'yo')
+    self.assertEqual(ent_copy.name, 'yoyo')  # Should not have changed.
+    # Get it from the datastore.
+    ent4 = key.get(use_cache=False, use_memcache=False)
+    self.assertFalse(ent4 is ent)
+    self.assertFalse(ent4 is ent2)
+    self.assertFalse(ent4 is ent3)
+    self.assertFalse(ent4 is ent_copy)
+    self.assertEqual(ent4.name, 'yoyo')
+    # Delete it from the datastore but leave it in the caches.
+    key.delete(use_cache=False, use_memcache=False)
+    # Assure it is gone from the datastore.
+    [ent5] = model.get_multi([key],
+                             use_cache=False, use_memcache=False)
+    self.assertEqual(ent5, None)
+    # Assure it is still in memcache.
+    ent6 = key.get(use_cache=False)
+    self.assertEqual(ent6.name, 'yo')
+    self.assertEqual(memcache.get(ctx._memcache_prefix + key.urlsafe()),
+                     ent._to_pb())
+    # Assure it is still in the in-memory cache.
+    ent7 = key.get()
+    self.assertEqual(ent7.name, 'yo')
+    self.assertTrue(ctx._cache[key] is ent7)
+    # Delete it from memcache.
+    model.delete_multi([key], use_cache=False)
+    # Assure it is gone from memcache.
+    ent8 = key.get(use_cache=False)
+    self.assertEqual(ent8, None)
+    # Assure it is still in the in-memory cache.
+    ent9 = key.get()
+    self.assertEqual(ent9.name, 'yo')
+    self.assertTrue(ctx._cache[key] is ent9)
+    # Delete it from the in-memory cache.
+    key.delete()
+    # Assure it is gone.
+    ent10 = key.get()
+    self.assertEqual(ent10, None)
+
+  def testContextOptions_Timeouts(self):
+    # Tweak the context.
+    ctx = tasklets.get_context()
+    ctx.set_cache_policy(True)
+    ctx.set_memcache_policy(True)
+    ctx.set_memcache_timeout_policy(0)
+    # Mock memcache.add_multi().
+    save_memcache_add_multi = memcache.add_multi
+    memcache_args_log = []
+    def mock_memcache_add_multi(*args, **kwds):
+      memcache_args_log.append((args, kwds))
+      return save_memcache_add_multi(*args, **kwds)
+    # Mock conn.async_put().
+    save_conn_async_put = ctx._conn.async_put
+    conn_args_log = []
+    def mock_conn_async_put(*args, **kwds):
+      conn_args_log.append((args, kwds))
+      return save_conn_async_put(*args, **kwds)
+    # Create some entities.
+    class MyModel(model.Model):
+      name = model.StringProperty()
+    e1 = MyModel(name='1')
+    e2 = MyModel(name='2')
+    e3 = MyModel(name='3')
+    e4 = MyModel(name='4')
+    e5 = MyModel(name='5')
+    # Test that the timeouts make it through to memcache and the datastore.
+    try:
+      memcache.add_multi = mock_memcache_add_multi
+      ctx._conn.async_put = mock_conn_async_put
+      [f1, f3] = model.put_multi_async([e1, e3],
+                                       memcache_timeout=7,
+                                       deadline=3)
+      [f4] = model.put_multi_async([e4],
+                                   deadline=2)
+      [x2, x5] = model.put_multi([e2, e5],
+                                 memcache_timeout=5)
+      x4 = f4.get_result()
+      x1 = f1.get_result()
+      x3 = f3.get_result()
+      # Write to memcache.
+      model.get_multi([x1, x3], use_cache=False, memcache_timeout=7)
+      model.get_multi([x4], use_cache=False)
+      model.get_multi([x2, x5], use_cache=False, memcache_timeout=5)
+    finally:
+      memcache.add_multi = save_memcache_add_multi
+      ctx._conn.async_put = save_conn_async_put
+    self.assertEqual([e1.key, e2.key, e3.key, e4.key, e5.key],
+                     [x1, x2, x3, x4, x5])
+    self.assertEqual(len(memcache_args_log), 3)
+    timeouts = set(kwds['time'] for args, kwds in memcache_args_log)
+    self.assertEqual(timeouts, set([0, 5, 7]))
+    self.assertEqual(len(conn_args_log), 3)
+    deadlines = set(args[0]._values.get('deadline')
+                    for (args, kwds) in conn_args_log)
+    self.assertEqual(deadlines, set([None, 2, 3]))
+
+  def testContextOptions_ThreeLevels(self):
+    # Reset policies to default.
+    ctx = tasklets.get_context()
+    ctx.set_cache_policy(None)
+    ctx.set_memcache_policy(None)
+    ctx.set_memcache_timeout_policy(None)
+
+    class M(model.Model):
+      s = model.StringProperty()
+
+    k = model.Key(M, '1')
+    a = M(s='a', key=k)
+    b = M(s='b', key=k)
+    c = M(s='c', key=k)
+
+    a.put(use_cache=True, use_memcache=False, use_datastore=False)
+    b.put(use_cache=False, use_memcache=True, use_datastore=False)
+    c.put(use_cache=False, use_memcache=False, use_datastore=True)
+
+    self.assertEqual(ctx._cache[k], a)
+    self.assertEqual(memcache.get('NDB:' + k.urlsafe()), b._to_pb())
+    self.assertEqual(ctx._conn.get([k]), [c])
+
+    self.assertEqual(k.get(), a)
+    self.assertEqual(k.get(use_cache=False), b)
+    self.assertEqual(k.get(use_cache=False, use_memcache=False), c)
+
+    k.delete(use_cache=True, use_memcache=False, use_datastore=False)
+    # Note: it is now in the Context cache marked as deleted.
+    self.assertEqual(k.get(use_cache=False), b)
+    k.delete(use_cache=False, use_memcache=True, use_datastore=False)
+    self.assertEqual(k.get(use_cache=False), c)
+    k.delete(use_cache=False, use_memcache=False, use_datastore=True)
+    self.assertEqual(k.get(use_cache=False), None)
+
+  def testContextOptions_PerClass(self):
+    # Reset policies to default.
+    ctx = tasklets.get_context()
+    ctx.set_cache_policy(None)
+    ctx.set_memcache_policy(None)
+    ctx.set_memcache_timeout_policy(None)
+
+    class M(model.Model):
+      s = model.StringProperty()
+      _use_cache = False
+      @classmethod
+      def _use_memcache(cls, key):
+        return bool(key.string_id())
+      @classmethod
+      def _use_datastore(cls, key):
+        return not bool(key.string_id())
+
+    a = M(s='a', key=model.Key(M, 'a'))  # Uses memcache only
+    b = M(s='b', key=model.Key(M, None))  # Uses datastore only
+    a.put()
+    b.put()
+
+    self.assertFalse(a.key in ctx._cache)
+    self.assertFalse(b.key in ctx._cache)
+    self.assertEqual(memcache.get('NDB:' + a.key.urlsafe()), a._to_pb())
+    self.assertEqual(memcache.get('NDB:' + b.key.urlsafe()), None)
+    self.assertEqual(ctx._conn.get([a.key]), [None])
+    self.assertEqual(ctx._conn.get([b.key]), [b])
+
   def testNamespaces(self):
     save_namespace = namespace_manager.get_namespace()
     try:
@@ -2033,6 +2238,105 @@ class ModelTests(test_utils.DatastoreTest):
     q = M.query(M.u == values['u'])
     self.assertEqual(q.get(), m)
 
+  def testNonRepeatedListValue(self):
+    class ReprProperty(model.BlobProperty):
+      def _validate(self, value):
+        # dummy
+        return value
+
+      def _serialize_value(self, value):
+        return value.__repr__()
+
+      def _deserialize_value(self, value):
+        return eval(value)
+
+    class M(model.Model):
+      p1 = ReprProperty()
+      p2 = ReprProperty(compressed=True)
+      p3 = ReprProperty(repeated=True)
+      p4 = ReprProperty(compressed=True, repeated=True)
+
+    key1 = model.Key(M, 'test')
+    value = [{'foo': 'bar'}, {'baz': 'ding'}]
+    m1 = M(key=key1, p1=value, p2=value, p3=[value, value], p4=[value, value])
+    m1.put()
+
+    # To test compression and deserialization with untouched properties.
+    m2 = key1.get()
+    m2.put()
+
+    m2 = key1.get()
+    self.assertEqual(m2.p1, value)
+    self.assertEqual(m2.p2, value)
+    self.assertEqual(m2.p3, [value, value])
+    self.assertEqual(m2.p4, [value, value])
+
+    # To test compression and deserialization after properties were accessed.
+    m2.put()
+
+  def testCompressedProperty(self):
+    class M(model.Model):
+      t1 = model.TextProperty()
+      t2 = model.TextProperty(compressed=True)
+      t3 = model.TextProperty(repeated=True)
+      t4 = model.TextProperty(compressed=True, repeated=True)
+      t5 = model.TextProperty()
+      t6 = model.TextProperty(compressed=True)
+      t7 = model.TextProperty(repeated=True)
+      t8 = model.TextProperty(compressed=True, repeated=True)
+      b1 = model.BlobProperty()
+      b2 = model.BlobProperty(compressed=True)
+      b3 = model.BlobProperty(repeated=True)
+      b4 = model.BlobProperty(compressed=True, repeated=True)
+
+    key1 = model.Key(M, 'test')
+    value1 = 'foo bar baz ding'
+    value2 = u'f\xd6\xd6 b\xe4r b\xe4z d\xefng'  # Umlauts on the vowels.
+    m1 = M(key=key1,
+           t1=value1, t2=value1, t3=[value1], t4=[value1],
+           t5=value2, t6=value2, t7=[value2], t8=[value2],
+           b1=value1, b2=value1, b3=[value1], b4=[value1])
+    m1.put()
+
+    # To test compression and deserialization with untouched properties.
+    m2 = key1.get()
+    m2.put()
+
+    m2 = key1.get()
+    self.assertEqual(m2.t1, value1)
+    self.assertEqual(m2.t2, value1)
+    self.assertEqual(m2.t3, [value1])
+    self.assertEqual(m2.t4, [value1])
+    self.assertEqual(m2.t5, value2)
+    self.assertEqual(m2.t6, value2)
+    self.assertEqual(m2.t7, [value2])
+    self.assertEqual(m2.t8, [value2])
+    self.assertEqual(m2.b1, value1)
+    self.assertEqual(m2.b2, value1)
+    self.assertEqual(m2.b3, [value1])
+    self.assertEqual(m2.b4, [value1])
+
+    # To test compression and deserialization after properties were accessed.
+    m2.put()
+
+  def testCompressedProperty_Repr(self):
+    class Foo(model.Model):
+      name = model.StringProperty()
+    class M(model.Model):
+      b = model.BlobProperty(compressed=True)
+      t = model.TextProperty(compressed=True)
+      l = model.LocalStructuredProperty(Foo, compressed=True)
+    x = M(b='b'*100, t=u't'*100, l=Foo(name='joe'))
+    x.put()
+    y = x.key.get()
+    self.assertFalse(x is y)
+    self.assertEqual(
+      repr(y),
+      'M(key=Key(\'M\', 1), '
+      'b=_CompressedValue(\'x\\x9cKJ\\xa2=\\x00\\x00\\x8e\\x01&I\'), '
+      'l=_CompressedValue(\'x\\x9c+\\xe2\\x97b\\xc9K\\xccMU`\\xd0b'
+      '\\x95b\\xce\\xcaO\\x05\\x00"\\x87\\x03\\xeb\'), '
+      't=_CompressedValue(\'x\\x9c+)\\xa1=\\x00\\x00\\xf1$-Q\'))')
 
 class CacheTests(test_utils.DatastoreTest):
   def SetupContextCache(self):
