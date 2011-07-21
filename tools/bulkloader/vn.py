@@ -20,6 +20,13 @@
 import appcfg
 appcfg.fix_sys_path()
 
+from google.appengine.api import users
+
+import sys
+sys.path = ['../../app'] + sys.path
+
+from app import Publisher, Collection, Record
+
 from ndb import model
 from ndb import query
 
@@ -154,6 +161,8 @@ class TmpTable(object):
         for row in rows:
             count += 1
             try:
+                reckey = model.Key('Record', 'bar')
+                
                 recguid = row['occurrenceID']
                 cols = row.keys()
                 cols.sort()
@@ -383,17 +392,23 @@ if __name__ == '__main__':
     parser.add_option("-f", "--csvfile", dest="csvfile",
                       help="The CSV file",
                       default=None)
-    parser.add_option("-u", "--url", dest="couchurl",
-                      help="The CouchDB URL",
-                      default=None)
     parser.add_option("-d", "--database-name", dest="dbname",
                       help="The CouchDB database name",
                       default=None)
-    parser.add_option("-c", "--chunk-size", dest="chunksize",
+    parser.add_option("-b", "--batch-size", dest="batchsize",
                       help="The chunk size",
                       default=None)
     parser.add_option("-l", "--log-file", dest="logfile",
                       help="A file to save log output to",
+                      default=None)
+    parser.add_option("-p", "--publisher-id", dest="publisher_id",
+                      help="The VertNet publisher ID",
+                      default=None)
+    parser.add_option("-c", "--collection-id", dest="collection_id",
+                      help="The VertNet collection ID",
+                      default=None)
+    parser.add_option("-u", "--admin-email", dest="admin_email",
+                      help="The VertNet admin email",
                       default=None)
 
     (options, args) = parser.parse_args()
@@ -403,4 +418,24 @@ if __name__ == '__main__':
     else:
         logging.basicConfig(level=logging.DEBUG)
 
-    execute(options)
+    logging.info('hi')
+
+    import os
+    os.environ['AUTH_DOMAIN'] = 'testbed'
+    os.environ['USER_EMAIL'] = options.admin_email
+    user = users.User(email=options.admin_email)
+    publisher = Publisher.create(
+        options.publisher_id, 
+        user,
+        'bulkload',
+        'vert-net')
+    collection = Collection.create(
+        options.collection_id, 
+        publisher.key,
+        user,
+        'bulkload',
+        'vert-net')
+
+    print 'publisher=%s, collection=%s' % (publisher.key.urlsafe(), collection.key.urlsafe())
+
+    #execute(options)
