@@ -36,8 +36,11 @@ from google.appengine.ext.webapp.util import login_required
 from ndb import model
 from ndb import query
 
-appid = os.environ['APPLICATION_ID']
-appver = os.environ['CURRENT_VERSION_ID'].split('.')[0]
+try:
+    appid = os.environ['APPLICATION_ID']
+    appver = os.environ['CURRENT_VERSION_ID'].split('.')[0]
+except:
+    pass
 
 # ------------------------------------------------------------------------------
 # Models
@@ -51,24 +54,22 @@ class Publisher(model.Model): # key_name=urlname
     """Model for a VertNet data Publisher."""
     name = model.StringProperty('n', required=True)
     urlname = model.ComputedProperty(lambda self: urlname(self.name))
-    owner = model.UserProperty('o', required=True)
     admins = model.UserProperty('a', repeated=True)
     created = model.DateTimeProperty('c', auto_now_add=True)
     updated = model.DateTimeProperty('u', auto_now=True)
     json = model.TextProperty('j', required=True) # JSON representation
 
     @classmethod
-    def create(cls, name):
+    def create(cls, name, user, appver, appid):
         """Creates a new Publisher instance."""
         return Publisher(
             id=urlname(name),
             name=name,
-            owner=users.get_current_user(),
             json=simplejson.dumps(dict(
                     url='http://%s.%s.appspot.com/publishers/%s' % \
                         (appver, appid, urlname(name)),
                     name=name,
-                    admin=users.get_current_user().nickname())))     
+                    admin=user.nickname())))     
 
     @classmethod
     def get_by_urlname(cls, urlname):
@@ -80,20 +81,18 @@ class Collection(model.Model): # key_name=urlname, parent=Publisher
     """Model for a collection of records."""
     name = model.StringProperty('n', required=True)
     urlname = model.ComputedProperty(lambda self: urlname(self.name))
-    owner = model.UserProperty('o', required=True)
     admins = model.UserProperty('a', repeated=True)
     created = model.DateTimeProperty('c', auto_now_add=True)
     updated = model.DateTimeProperty('u', auto_now=True)
     json = model.TextProperty('j', required=True) # JSON representation
 
     @classmethod
-    def create(cls, name, publisher_key):
+    def create(cls, name, publisher_key, admin, appver, appid):
         """Creates a new Collection instance."""
         return Collection(
             parent=publisher_key,
             id=urlname(name),
             name=name,
-            owner=users.get_current_user(),
             json=simplejson.dumps(dict(
                     name=name,
                     admin=users.get_current_user().nickname(),
@@ -253,6 +252,23 @@ class LoadTestData(BaseHandler):
             dci.append(RecordIndex.create(rec, ckey))
             created += 1
         self.response.out.write('Done. Created %s records' % created)
+
+class BulkloadHandler(BaseHandler):
+    @login_required
+    def post(self):
+        batch = simplejson.loads(self.request.get('batch', None))
+        publisher = Publisher.get_by_urlname(urlname(batch.publisher_name))
+        collection = Collection.get_by_urlname(
+            urlname(batch.collection_name, publisher.key))
+        entities = []
+        indexes = []
+        for rec in batch.recs:
+            rec = dict((k.lower(), v) for k,v in rec.iteritems()) # lowercase all keys. do this locally?
+            entities.append(Record.create(rec, collection.key))
+            indexes.append(RecordIndex.create(rec, collection.key))
+        model.put_multi(entities)
+        model.put_multi(indexes)
+        
 
 class PublisherHandler(BaseHandler):
     def get(self):        
