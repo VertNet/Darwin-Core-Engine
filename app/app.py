@@ -315,11 +315,21 @@ class RecordFeedHandler(BaseHandler):
             'Publisher=%s, Collection=%s, Record=%s' % \
                 (publisher_name, collection_name, occurrence_id))
 
+class BulkloadHandler(BaseHandler):
+    def post(self):
+        user = users.get_current_user()
+        if not user:
+            self.error(401)
+            return
+        logging.info('BOOM')
+        self.response.out.write('BOOM')
+
 application = webapp.WSGIApplication(
          [('/admin/load', LoadTestData),
           ('/upload', FileUploadHandler),
           ('/upload-form', UploadForm),
           ('/api/search', ApiHandler),
+          ('/api/bulkload', BulkloadHandler),
           ('/publishers/?', PublisherHandler),
           ('/publishers/([\w-]+)/?', PublisherFeedHandler),
           ('/publishers/([\w-]+)/([\w-]+)/?', CollectionHandler),

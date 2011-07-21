@@ -85,24 +85,52 @@ class AppEngine(object):
             """Any keyword arguments."""
             pass
 
-        def send(self, rpc):
-            return self.server.Send(
-                rpc.request_path(),
-                rpc.payload(),
-                rpc.content_type(),
-                rpc.timeout(),
-                **rpc.kwargs())
+    def send(self, rpc):
+        return self.server.Send(
+            rpc.request_path(),
+            rpc.payload(),
+            rpc.content_type(),
+            rpc.timeout(),
+            **rpc.kwargs())
 
-        def __init__(self, host, email, passwd):
-            """Initializes the server with user credentials and app details."""
-            logging.info('Host %s' % host)
-            self.server = HttpRpcServer(
-                host,
-                lambda:(email, passwd),
-                None,
-                'silverlining',
-                debug_data=True,
-                secure=False)
+    def __init__(self, host, email, passwd):
+        """Initializes the server with user credentials and app details."""
+        logging.info('Host %s' % host)
+        self.server = HttpRpcServer(
+            host,
+            lambda:(email, passwd),
+            None,
+            'vert-net',
+            debug_data=True,
+            secure=True)
+
+class Bulkloader(object):
+
+    class BulkloaderRequest(AppEngine.RPC):
+
+        def __init__(self, records):
+            self.records = records
+
+        def request_path(self):
+            return '/api/bulkload'
+
+        def payload(self):
+            return simplejson.dumps(self.records)
+        
+        def content_type(self):
+            return 'application/x-www-form-urlencoded'
+    
+        def timeout(self):
+            return None
+  
+        def kwargs(self):  
+            return dict()
+
+    def __init__(self, host, email, passwd):
+        self.server = AppEngine(host, email, passwd)  
+
+    def load(self, records):
+        return self.server.send(Bulkloader.BulkloaderRequest(records))
 
 """
 cache table
@@ -410,6 +438,12 @@ if __name__ == '__main__':
     parser.add_option("-u", "--admin-email", dest="admin_email",
                       help="The VertNet admin email",
                       default=None)
+    parser.add_option("-a", "--admin-password", dest="admin_password",
+                      help="The VertNet admin password",
+                      default=None)
+    parser.add_option("-s", "--host", dest="host",
+                      help="The VertNet App Engine host",
+                      default=None)
 
     (options, args) = parser.parse_args()
 
@@ -436,6 +470,10 @@ if __name__ == '__main__':
         'bulkload',
         'vert-net')
 
-    print 'publisher=%s, collection=%s' % (publisher.key.urlsafe(), collection.key.urlsafe())
+    #print 'publisher=%s, collection=%s' % (publisher.key.urlsafe(), collection.key.urlsafe())
+    
+    print str(options)
+    r = Bulkloader(options.host, options.admin_email, options.admin_password)
+    print r.load([dict(foo='hi', bar='there')])
 
     #execute(options)

@@ -11,10 +11,10 @@ builtins:
 handlers:
 
 - url: /api/.*
-  script: api.py
+  script: app.py
   
 - url: /admin/.*
-  script: api.py
+  script: app.py
   login: admin
 
 - url: /mapreduce(/.*)?
