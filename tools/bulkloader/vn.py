@@ -35,6 +35,7 @@ import csv
 import hashlib
 import logging
 from optparse import OptionParser
+import os
 import re
 import simplejson
 import sqlite3
@@ -106,7 +107,7 @@ class AppEngine(object):
 
 class Bulkloader(object):
 
-    class BulkloaderRequest(AppEngine.RPC):
+    class Request(AppEngine.RPC):
 
         def __init__(self, records):
             self.records = records
@@ -130,7 +131,7 @@ class Bulkloader(object):
         self.server = AppEngine(host, email, passwd)  
 
     def load(self, records):
-        return self.server.send(Bulkloader.BulkloaderRequest(records))
+        return self.server.send(Bulkloader.Request(records))
 
 """
 cache table
@@ -186,31 +187,31 @@ class TmpTable(object):
 
     def _rowgenerator(self, rows):
         count = 0
+        pkey = model.Key('Publisher', self.options.publisher_name)
+        ckey = model.Key('Collection', self.options.collection_name, parent=pkey)
         for row in rows:
             count += 1
             try:
-                reckey = model.Key('Record', 'bar')
-                
-                recguid = row['occurrenceID']
+                reckey = model.Key('Record', row['occurrenceid'], parent=ckey).urlsafe()
                 cols = row.keys()
                 cols.sort()
                 fields = [row[x].strip() for x in cols]
                 line = reduce(lambda x,y: '%s%s' % (x, y), fields)
                 rechash = hashlib.sha224(line).hexdigest()
                 recjson = simplejson.dumps(row)
-                yield (recguid, rechash, recjson)
+                yield (reckey, rechash, recjson)
             except Exception as (strerror):
                 logging.error('Unable to process row %s - %s' % (count, strerror))
-
 
     def _insertchunk(self, rows, cursor):
         logging.info('%s prepared' % self.totalcount)
         cursor.executemany(self.insertsql, self._rowgenerator(rows))
         self.conn.commit()
 
-    def insert(self, csvfile, chunksize):
+    def insert(self):
+        csvfile = self.options.csvfile
         logging.info('Inserting %s to tmp table.' % csvfile)
-
+        batchsize = int(self.options.batchsize)
         rows = []
         count = 0
         self.totalcount = 0
@@ -219,12 +220,13 @@ class TmpTable(object):
         reader = csv.DictReader(open(csvfile, 'r'), skipinitialspace=True)
 
         for row in reader:
-            if count >= chunksize:
+            if count >= batchsize:
                 self.totalcount += count
                 self._insertchunk(rows, cursor)
                 count = 0
                 rows = []
                 chunkcount += 1
+            row = dict((k.lower(), v) for k,v in row.iteritems()) # lowercase all keys
             rows.append(row)
             count += 1
 
@@ -255,7 +257,7 @@ class NewRecords(object):
         cursor.executemany(self.insertsql, bulk)
         self.conn.commit()
 
-    def execute(self, chunksize):
+    def execute(self, batchsize):
         logging.info("Checking for new records")
 
         cursor = self.conn.cursor()
@@ -266,7 +268,7 @@ class NewRecords(object):
         self.totalcount = 0
 
         for row in newrecs.fetchall():
-            if count >= chunksize:
+            if count >= batchsize:
                 self.totalcount += count
                 self._insertchunk(cursor, recs, docs)
                 count = 0
@@ -308,7 +310,7 @@ class UpdatedRecords(object):
         cursor.executemany(self.updatedocrevsql, updates)
         self.conn.commit()
 
-    def execute(self, chunksize):
+    def execute(self, batchsize):
         logging.info("Checking for updated records")
 
         cursor = self.conn.cursor()
@@ -319,7 +321,7 @@ class UpdatedRecords(object):
         self.totalcount = 0
 
         for row in updatedrecs.fetchall():
-            if count >= chunksize:
+            if count >= batchsize:
                 self._updatechunk(cursor, recs, docs)
                 self.totalcount += count
                 count = 0
@@ -360,7 +362,7 @@ class DeletedRecords(object):
         for doc in docs:
             self.couch.delete(doc)
 
-    def execute(self, chunksize):
+    def execute(self, batchsize):
         logging.info('Checking for deleted records')
 
         cursor = self.conn.cursor()
@@ -371,7 +373,7 @@ class DeletedRecords(object):
         recs = []
 
         for row in deletes.fetchall():
-            if count >= chunksize:
+            if count >= batchsize:
                 self._deletechunk(cursor, recs, docs)
                 self.totalcount += count
                 count = 0
@@ -395,20 +397,20 @@ class DeletedRecords(object):
 
 def execute(options):
     conn = setupdb()
-    chunksize = int(options.chunksize)
+    batchsize = int(options.batchsize)
     couch = couchdb.Server(options.couchurl)[options.dbname]
 
     # Loads CSV rows into tmp table:
-    TmpTable(conn).insert(options.csvfile, chunksize)
+    TmpTable(conn).insert(options.csvfile, batchsize)
 
     # Handles new records:
-    NewRecords(conn, couch).execute(chunksize)
+    NewRecords(conn, couch).execute(batchsize)
 
     # Handles updated records:
-    UpdatedRecords(conn, couch).execute(chunksize)
+    UpdatedRecords(conn, couch).execute(batchsize)
 
     # Handles deleted records:
-    DeletedRecords(conn, couch).execute(chunksize)
+    DeletedRecords(conn, couch).execute(batchsize)
 
     conn.close()
 
@@ -429,51 +431,68 @@ if __name__ == '__main__':
     parser.add_option("-l", "--log-file", dest="logfile",
                       help="A file to save log output to",
                       default=None)
-    parser.add_option("-p", "--publisher-id", dest="publisher_id",
+    parser.add_option("-p", "--publisher-name", dest="publisher_name",
                       help="The VertNet publisher ID",
                       default=None)
-    parser.add_option("-c", "--collection-id", dest="collection_id",
+    parser.add_option("-c", "--collection-name", dest="collection_name",
                       help="The VertNet collection ID",
                       default=None)
     parser.add_option("-u", "--admin-email", dest="admin_email",
                       help="The VertNet admin email",
                       default=None)
-    parser.add_option("-a", "--admin-password", dest="admin_password",
+    parser.add_option("-w", "--admin-password", dest="admin_password",
                       help="The VertNet admin password",
                       default=None)
-    parser.add_option("-s", "--host", dest="host",
+    parser.add_option("-t", "--host", dest="host",
                       help="The VertNet App Engine host",
                       default=None)
 
     (options, args) = parser.parse_args()
 
-    if options.logfile:
-        logging.basicConfig(level=logging.DEBUG, filename=options.logfile)
-    else:
-        logging.basicConfig(level=logging.DEBUG)
+#    if options.logfile:
+#        logging.basicConfig(level=logging.DEBUG, filename=options.logfile)
+#    else:
+#        logging.basicConfig(level=logging.DEBUG)
 
-    logging.info('hi')
-
-    import os
-    os.environ['AUTH_DOMAIN'] = 'testbed'
+    os.environ['AUTH_DOMAIN'] = 'gmail.com'
     os.environ['USER_EMAIL'] = options.admin_email
     user = users.User(email=options.admin_email)
+ 
     publisher = Publisher.create(
-        options.publisher_id, 
+        options.publisher_name, 
         user,
         'bulkload',
-        'vert-net')
+        'vertnet')
+    
     collection = Collection.create(
-        options.collection_id, 
+        options.collection_name, 
         publisher.key,
         user,
         'bulkload',
-        'vert-net')
-
-    #print 'publisher=%s, collection=%s' % (publisher.key.urlsafe(), collection.key.urlsafe())
+        'vertnet')
     
-    print str(options)
     r = Bulkloader(options.host, options.admin_email, options.admin_password)
-    print r.load([dict(foo='hi', bar='there')])
+    # print r.load([
+    #         dict(
+    #             publisher_key=publisher.key.urlsafe(), 
+    #             collection_key=collection.key.urlsafe())])
 
+    conn = setupdb()
+    batchsize = int(options.batchsize)
+
+    # Loads CSV rows into tmp table:
+    TmpTable(conn, options).insert()
+
+    # Handles new records:
+    # NewRecords(conn, couch).execute(batchsize)
+
+    # Handles updated records:
+    # UpdatedRecords(conn, couch).execute(batchsize)
+
+    # Handles deleted records:
+    # DeletedRecords(conn, couch).execute(batchsize)
+
+    conn.close()
+    
     #execute(options)
+   
