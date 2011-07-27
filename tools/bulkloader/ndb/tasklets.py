@@ -63,6 +63,7 @@ import collections
 import logging
 import os
 import sys
+import threading
 import types
 
 from google.appengine.api.apiproxy_stub_map import UserRPC
@@ -73,6 +74,7 @@ from ndb import eventloop, utils
 
 logging_debug = utils.logging_debug
 
+
 def is_generator(obj):
   """Helper to test for a generator object.
 
@@ -80,6 +82,48 @@ def is_generator(obj):
   generator function, not for a generator function.
   """
   return isinstance(obj, types.GeneratorType)
+
+
+class _State(threading.local):
+  """Hold thread-local state."""
+
+  current_context = None
+
+  def __init__(self):
+    super(_State, self).__init__()
+    self.all_pending = set()
+
+  def add_pending(self, fut):
+    logging_debug('all_pending: add %s', fut)
+    self.all_pending.add(fut)
+
+  def remove_pending(self, fut, status='success'):
+    if fut in self.all_pending:
+      logging_debug('all_pending: %s: remove %s', status, fut)
+      self.all_pending.remove(fut)
+    else:
+      logging_debug('all_pending: %s: not found %s', status, fut)
+
+  def clear_all_pending(self):
+    if self.all_pending:
+      logging.info('all_pending: clear %s', self.all_pending)
+      self.all_pending.clear()
+    else:
+      logging_debug('all_pending: clear no-op')
+
+  def dump_all_pending(self, verbose=False):
+    all = []
+    for fut in self.all_pending:
+      if verbose:
+        line = fut.dump() + ('\n' + '-'*40)
+      else:
+        line = fut.dump_stack()
+      all.append(line)
+    return '\n'.join(all)
+
+
+_state = _State()
+
 
 class Future(object):
   """A Future has 0 or more callbacks.
@@ -97,8 +141,6 @@ class Future(object):
   IDLE = RPC.IDLE  # Not yet running (unused)
   RUNNING = RPC.RUNNING  # Not yet completed.
   FINISHING = RPC.FINISHING  # Completed.
-
-  _all_pending = set()  # Set of all pending Future instances.
 
   # XXX Add docstrings to all methods.  Separate PEP 3148 API from RPC API.
 
@@ -118,8 +160,7 @@ class Future(object):
     self._exception = None
     self._traceback = None
     self._callbacks = []
-    logging_debug('_all_pending: add %s', self)
-    self._all_pending.add(self)
+    _state.add_pending(self)
     self._next = None  # Links suspended Futures together in a stack.
 
   # TODO: Add a __del__ that complains if neither get_exception() nor
@@ -157,25 +198,6 @@ class Future(object):
       fut = fut._next
     return '\n waiting for '.join(lines)
 
-  @classmethod
-  def clear_all_pending(cls):
-    if cls._all_pending:
-      logging.info('_all_pending: clear %s', cls._all_pending)
-    else:
-      logging_debug('_all_pending: clear no-op')
-    cls._all_pending.clear()
-
-  @classmethod
-  def dump_all_pending(cls, verbose=False):
-    all = []
-    for fut in cls._all_pending:
-      if verbose:
-        line = fut.dump() + ('\n' + '-'*40)
-      else:
-        line = fut.dump_stack()
-      all.append(line)
-    return '\n'.join(all)
-
   def add_callback(self, callback, *args, **kwds):
     if self._done:
       eventloop.queue_call(None, callback, *args, **kwds)
@@ -186,8 +208,7 @@ class Future(object):
     assert not self._done
     self._result = result
     self._done = True
-    logging_debug('_all_pending: remove successful %s', self)
-    self._all_pending.remove(self)
+    _state.remove_pending(self)
     for callback, args, kwds  in self._callbacks:
       eventloop.queue_call(None, callback, *args, **kwds)
 
@@ -197,11 +218,7 @@ class Future(object):
     self._exception = exc
     self._traceback = tb
     self._done = True
-    if self in self._all_pending:
-      logging_debug('_all_pending: remove failing %s', self)
-      self._all_pending.remove(self)
-    else:
-      logging_debug('_all_pending: not found %s', self)
+    _state.remove_pending(self, status='fail')
     for callback, args, kwds in self._callbacks:
       eventloop.queue_call(None, callback, *args, **kwds)
 
@@ -224,9 +241,9 @@ class Future(object):
     while not self._done:
       if not ev.run1():
         logging.info('Deadlock in %s', self)
-        logging.info('All pending Futures:\n%s', self.dump_all_pending())
+        logging.info('All pending Futures:\n%s', _state.dump_all_pending())
         logging_debug('All pending Futures (verbose):\n%s',
-                      self.dump_all_pending(verbose=True))
+                      _state.dump_all_pending(verbose=True))
         self.set_exception(RuntimeError('Deadlock waiting for %s' % self))
 
   def get_exception(self):
@@ -477,10 +494,6 @@ class QueueFuture(Future):
   result is already returned return EOFError as their Future's
   exception.  (I.e., q.getq() returns a Future as always, but yieding
   that Future raises EOFError.)
-
-  NOTE: If .getq() is given a default argument, it will be returned as
-  the result instead of raising EOFError.  However, other exceptions
-  are still passed through.
 
   NOTE: Values can also be pushed directly via .putq(value).  However
   there is no flow control -- if the producer is faster than the
@@ -877,14 +890,10 @@ def synctasklet(func):
 
 _CONTEXT_KEY = '__CONTEXT__'
 
-# TODO: Use thread-local for this.
-_context = None
-
 def get_context():
-  global _context
   ctx = None
   if os.getenv(_CONTEXT_KEY):
-    ctx = _context
+    ctx = _state.current_context
   if ctx is None:
     ctx = make_default_context()
     set_context(ctx)
@@ -895,9 +904,8 @@ def make_default_context():
   return context.Context()
 
 def set_context(new_context):
-  global _context
   os.environ[_CONTEXT_KEY] = '1'
-  _context = new_context
+  _state.current_context = new_context
 
 # TODO: Rework the following into documentation.
 

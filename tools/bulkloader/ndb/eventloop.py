@@ -13,19 +13,21 @@ The API here is inspired by Monocle.
 import bisect
 import logging
 import os
+import threading
 import time
 
 from google.appengine.api.apiproxy_rpc import RPC
 
 from google.appengine.datastore import datastore_rpc
 
-import utils
+from ndb import utils
 
 logging_debug = utils.logging_debug
 
 IDLE = RPC.IDLE
 RUNNING = RPC.RUNNING
 FINISHING = RPC.FINISHING
+
 
 class EventLoop(object):
   """An event loop."""
@@ -131,42 +133,51 @@ class EventLoop(object):
         break
 
 
+class _State(threading.local):
+  event_loop = None
+
+
 _EVENT_LOOP_KEY = '__EVENT_LOOP__'
-_event_loop = None
+
+_state = _State()
+
 
 def get_event_loop():
-  """Return a singleton EventLoop instance.
+  """Return a EventLoop instance.
 
-  A new singleton is created for each new HTTP request.  We determine
+  A new instance is created for each new HTTP request.  We determine
   that we're in a new request by inspecting os.environ, which is reset
-  at the start of each request.
+  at the start of each request.  Also, each thread gets its own loop.
   """
-  # TODO: Use thread-local storage?
-  global _event_loop
   ev = None
   if os.getenv(_EVENT_LOOP_KEY):
-    ev = _event_loop
+    ev = _state.event_loop
   if ev is None:
     ev = EventLoop()
-    _event_loop = ev
+    _state.event_loop = ev
     os.environ[_EVENT_LOOP_KEY] = '1'
   return ev
+
 
 def queue_call(*args, **kwds):
   ev = get_event_loop()
   ev.queue_call(*args, **kwds)
 
+
 def queue_rpc(rpc, callable=None, *args, **kwds):
   ev = get_event_loop()
   ev.queue_rpc(rpc, callable, *args, **kwds)
+
 
 def run():
   ev = get_event_loop()
   ev.run()
 
+
 def run1():
   ev = get_event_loop()
   return ev.run1()
+
 
 def run0():
   ev = get_event_loop()
