@@ -1,15 +1,15 @@
 10
 
 dir
-180
+215
 http://appengine-mapreduce.googlecode.com/svn/trunk/python/src/mapreduce/static
 http://appengine-mapreduce.googlecode.com/svn
 
 
 
-2011-05-11T16:34:30.342667Z
-171
-mike.aizatsky
+2011-07-19T17:39:33.564063Z
+211
+appengine.mirrorbot@gmail.com
 
 
 
@@ -32,11 +32,11 @@ file
 
 
 
-2011-07-05T01:51:39.742606Z
-f5e099895c66894855b0da562e2af13b
-2010-05-18T22:00:45.277228Z
-12
-mike.aizatsky
+2011-07-27T17:02:31.878267Z
+444eca206148b6b56198e360907b3595
+2011-07-19T00:24:25.850434Z
+210
+appengine.mirrorbot@gmail.com
 has-props
 
 
@@ -58,7 +58,7 @@ has-props
 
 
 
-1681
+1509
 
 detail.html
 file
@@ -168,11 +168,11 @@ file
 
 
 
-2011-07-05T01:51:39.742606Z
-809196b5af49b9f1e369e609b55fc705
-2011-05-11T16:34:30.342667Z
-171
-mike.aizatsky
+2011-07-27T17:02:31.878267Z
+e0e0bb043cbf71e9323e725ec3512384
+2011-07-19T17:39:33.564063Z
+211
+appengine.mirrorbot@gmail.com
 has-props
 
 
@@ -194,5 +194,5 @@ has-props
 
 
 
-17771
+18664
 
