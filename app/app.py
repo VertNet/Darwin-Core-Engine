@@ -142,7 +142,7 @@ class Record(BaseModel): # key_name=record.occurrenceid, parent=Collection
             collection_key = Collection.get_by_name(cname, publisher.key).key            
         return Record(
             parent=collection_key,
-            id=rec['sourceid'],
+            id=rec['occurrenceid'],
             record=simplejson.dumps(rec))
 
     # @classmethod

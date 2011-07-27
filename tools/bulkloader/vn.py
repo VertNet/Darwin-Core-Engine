@@ -237,8 +237,8 @@ class TmpTable(object):
             self._insertchunk(rows, cursor)
 
         logging.info('%s rows inserted to tmp table' % self.totalcount)
-
-
+                    
+        
 class NewRecords(object):
 
     def __init__(self, conn, options, bulkloader):
@@ -256,6 +256,9 @@ class NewRecords(object):
         self.conn.commit()
 
     def execute(self):
+        """
+        Payload spec: https://gist.github.com/1108715
+        """
         logging.info("Checking for new records")
 
         batchsize = int(self.options.batchsize)
