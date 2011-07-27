@@ -40,6 +40,7 @@ import re
 import simplejson
 import sqlite3
 import time
+import urllib
 from uuid import uuid4
 from abc import ABCMeta, abstractmethod, abstractproperty
 from google.appengine.tools.appengine_rpc import HttpRpcServer
@@ -103,24 +104,24 @@ class AppEngine(object):
             None,
             'vert-net',
             debug_data=True,
-            secure=True)
+            secure=False)
 
 class Bulkloader(object):
 
     class Request(AppEngine.RPC):
 
-        def __init__(self, records):
-            self.records = records
+        def __init__(self, payload):
+            self._payload = payload
 
         def request_path(self):
             return '/api/bulkload'
 
         def payload(self):
-            return simplejson.dumps(self.records)
-        
+            return simplejson.dumps(self._payload)
+
         def content_type(self):
             return 'application/x-www-form-urlencoded'
-    
+
         def timeout(self):
             return None
   
@@ -130,8 +131,8 @@ class Bulkloader(object):
     def __init__(self, host, email, passwd):
         self.server = AppEngine(host, email, passwd)  
 
-    def load(self, records):
-        return self.server.send(Bulkloader.Request(records))
+    def load(self, payload):
+        return self.server.send(Bulkloader.Request(payload))
 
 """
 cache table
@@ -198,6 +199,7 @@ class TmpTable(object):
                 fields = [row[x].strip() for x in cols]
                 line = reduce(lambda x,y: '%s%s' % (x, y), fields)
                 rechash = hashlib.sha224(line).hexdigest()
+                row['key_urlsafe'] = reckey
                 recjson = simplejson.dumps(row)
                 yield (reckey, rechash, recjson)
             except Exception as (strerror):
@@ -239,30 +241,27 @@ class TmpTable(object):
 
 class NewRecords(object):
 
-    def __init__(self, conn, couch):
+    def __init__(self, conn, options, bulkloader):
         self.conn = conn
-        self.couch = couch
-        self.insertsql = 'insert into %s values (?, ?, ?, ?, ?)' % CACHE_TABLE
-        self.updatesql = 'update %s set docrev=? where docid=?' % CACHE_TABLE
-        self.deltasql = "SELECT * FROM %s LEFT OUTER JOIN %s USING (recguid) WHERE %s.recguid is null"
+        self.options = options
+        self.bulkloader = bulkloader
+        self.insertsql = 'insert into %s values (?, ?, ?)' % CACHE_TABLE
+        self.deltasql = "SELECT * FROM %s LEFT OUTER JOIN %s USING (reckey) WHERE %s.reckey is null"
         self.totalcount = 0
 
-    def _insertchunk(self, cursor, recs, docs):
+    def _insertchunk(self, cursor, recs, entities):
         logging.info('%s inserted' % self.totalcount)
-        bulk = []
-        index = 0
-        for doc in self.couch.update(docs):
-            bulk.append((recs[index]) + (doc[2],))
-            index += 1
-        cursor.executemany(self.insertsql, bulk)
+        print self.bulkloader.load(entities)
+        cursor.executemany(self.insertsql, recs)
         self.conn.commit()
 
-    def execute(self, batchsize):
+    def execute(self):
         logging.info("Checking for new records")
 
+        batchsize = int(self.options.batchsize)
         cursor = self.conn.cursor()
         newrecs = cursor.execute(self.deltasql % (TMP_TABLE, CACHE_TABLE, CACHE_TABLE))
-        docs = []
+        entities = []
         recs = []
         count = 0
         self.totalcount = 0
@@ -270,23 +269,24 @@ class NewRecords(object):
         for row in newrecs.fetchall():
             if count >= batchsize:
                 self.totalcount += count
-                self._insertchunk(cursor, recs, docs)
+                self._insertchunk(cursor, recs, entities)
                 count = 0
                 recs = []
-                docs = []
+                entities = []
+
             count += 1
-            recguid = row[0]
+
+            reckey = row[0]
             rechash = row[1]
-            docid = uuid4().hex
             recjson = row[2]
-            doc = simplejson.loads(recjson)
-            doc['_id'] = docid
-            docs.append(doc)
-            recs.append((recguid, rechash, recjson, docid))
+
+            entity = simplejson.loads(recjson)
+            entities.append(entity)
+            recs.append((reckey, rechash, recjson))
 
         if count > 0:
             self.totalcount += count
-            self._insertchunk(cursor, recs, docs)
+            self._insertchunk(cursor, recs, entities)
 
         self.conn.commit()
         logging.info('INSERT: %s records inserted' % self.totalcount)
@@ -451,31 +451,33 @@ if __name__ == '__main__':
 
 #    if options.logfile:
 #        logging.basicConfig(level=logging.DEBUG, filename=options.logfile)
-#    else:
-#        logging.basicConfig(level=logging.DEBUG)
+#    else:#
+    logging.basicConfig(level=logging.DEBUG)
 
     os.environ['AUTH_DOMAIN'] = 'gmail.com'
     os.environ['USER_EMAIL'] = options.admin_email
     user = users.User(email=options.admin_email)
  
-    publisher = Publisher.create(
-        options.publisher_name, 
-        user,
-        'bulkload',
-        'vertnet')
+    # publisher = Publisher.create(
+    #     options.publisher_name, 
+    #     user,
+    #     'bulkload',
+    #     'vertnet')
     
-    collection = Collection.create(
-        options.collection_name, 
-        publisher.key,
-        user,
-        'bulkload',
-        'vertnet')
+    # collection = Collection.create(
+    #     options.collection_name, 
+    #     publisher.key,
+    #     user,
+    #     'bulkload',
+    #     'vertnet')
     
-    r = Bulkloader(options.host, options.admin_email, options.admin_password)
-    # print r.load([
-    #         dict(
-    #             publisher_key=publisher.key.urlsafe(), 
-    #             collection_key=collection.key.urlsafe())])
+    bulkloader = Bulkloader(options.host, options.admin_email, options.admin_password)
+    #print r.load(collection._to_pb().SerializeToString())
+    #r.load(dict(aaron="cool"))
+    #print r.load([
+    #        dict(
+    #            publisher_key=publisher.key.urlsafe(), 
+    #            collection_key=collection.key.urlsafe())])
 
     conn = setupdb()
     batchsize = int(options.batchsize)
@@ -484,7 +486,7 @@ if __name__ == '__main__':
     TmpTable(conn, options).insert()
 
     # Handles new records:
-    # NewRecords(conn, couch).execute(batchsize)
+    NewRecords(conn, options, bulkloader).execute()
 
     # Handles updated records:
     # UpdatedRecords(conn, couch).execute(batchsize)

@@ -31,6 +31,8 @@ from google.appengine.ext.webapp.util import run_wsgi_app
 from google.appengine.api import users
 from google.appengine.api import taskqueue
 from google.appengine.ext.webapp.util import login_required
+from google.appengine.datastore import datastore_rpc
+from google.appengine.datastore import entity_pb
 
 # Datastore Plus imports
 from ndb import model
@@ -348,7 +350,8 @@ class BulkloadHandler(BaseHandler):
         if not user:
             self.error(401)
             return
-        self.response.out.write('BOOM')
+        logging.info(self.request.body)
+        self.response.out.write('hi')
 
 application = webapp.WSGIApplication(
          [('/admin/load', LoadTestData),
