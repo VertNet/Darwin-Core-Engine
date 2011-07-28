@@ -48,7 +48,7 @@ class PostReceiveHandler(common.BaseHandler):
                     reduce(
                         lambda x,y: '%s-%s' % (x,y), 
                         c['timestamp'].split('-')[:-1]),                                                 
-                    "%Y-%m-%dT%H:%M:%S")),
+                    "%Y-%m-%dT%H:%M:%S"))
         mail.send_mail(
             sender="GitHub <commits@vert-net.appspotmail.com>",
             #to="vertnet-developers@googlegroups.com",
