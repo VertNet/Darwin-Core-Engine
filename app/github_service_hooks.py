@@ -18,6 +18,7 @@ __author__ = "Aaron Steele"
 
 import common
 import pretty
+from dateutil.parser import parse
 
 from datetime import datetime
 import logging
@@ -44,12 +45,7 @@ class PostReceiveHandler(common.BaseHandler):
             body += '%s\n%s' % (c['message'], c['url'])
             body += '\n%s (author)' % c['author']['name']
             #body += '\n%s\n\n' % c['timestamp']
-            body += '\n%s\n\n' % pretty.date(
-                time=datetime.strptime(
-                    reduce(
-                        lambda x,y: '%s-%s' % (x,y), 
-                        c['timestamp'].split('-')[:-1]),                                                 
-                    "%Y-%m-%dT%H:%M:%S"))
+            body += '\n%s\n\n' % pretty.date(parse(c['timestamp']))
         mail.send_mail(
             sender="GitHub <commits@vert-net.appspotmail.com>",
             #to="vertnet-developers@googlegroups.com",
