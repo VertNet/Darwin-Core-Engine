@@ -91,8 +91,8 @@ class EmailHandler(InboundMailHandler):
                            to='eightysteele@gmail.com',
                            subject=msg.subject,
                            body=msg.body)
-            return        
-            
+            return  
+
         data = getftdata()
         addrs = getuniques(getaddrs(msg.to))
         try:
