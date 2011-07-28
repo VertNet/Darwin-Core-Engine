@@ -22,11 +22,14 @@ def date(time=False, asdays=False, short=False):
     '''
 
     now = datetime.now()
+
     if type(time) is int:   time = datetime.fromtimestamp(time)
     elif not time:          time = now
 
-    if time.replace(tzinfo=None) > now:  past, diff = False, time.replace(tzinfo=None) - now
-    else:           past, diff = True,  now - time.replace(tzinfo=None)
+    now = now.replace(tzinfo=time.tzinfo)
+
+    if time > now:  past, diff = False, time - now
+    else:           past, diff = True,  now - time
     seconds = diff.seconds
     days    = diff.days
 
