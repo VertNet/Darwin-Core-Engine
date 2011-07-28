@@ -52,7 +52,36 @@ DB_FILE = 'bulk.sqlite3.db'
 CACHE_TABLE = 'cache'
 TMP_TABLE = 'tmp'
 
-#===============================================================================
+class Record(object):
+    
+    @classmethod
+    def bulk_payload(cls, recjsons, pkey_urlsafe, ckey_urlsafe):
+        """Returns a payload for a batch of records: https://gist.github.com/1108715"""
+        return dict(
+            publishers=dict(
+                key_urlsafe=pkey_urlsafe,
+                collections=[dict(
+                        key_urlsafe=ckey_urlsafe,
+                        records=[cls.entity_payload(recjson) for recjson in recjsons])]))
+        
+    @classmethod
+    def entity_payload(cls, recjson):
+        """Returns an entities payload for a single record: https://gist.github.com/1108715"""
+        key_urlsafe = recjson['key_urlsafe']
+        recjson.pop('key_urlsafe')
+        sourceid_column = 'occurrenceid'        
+        corpus = set([x.strip().lower() for x in recjson.values()]) 
+        corpus.update(
+            reduce(lambda x,y: x+y, 
+                   map(lambda x: [s.strip().lower() for s in x.split() if s], 
+                       recjson.values()))) # adds tokenized values                
+        return dict(
+                key_urlsafe=key_urlsafe,
+                sourceid_column=sourceid_column,
+                entity=recjson,
+                index=dict(
+                    corpus=list(corpus)))
+    
 
 class AppEngine(object):
 
@@ -110,14 +139,15 @@ class Bulkloader(object):
 
     class Request(AppEngine.RPC):
 
-        def __init__(self, payload):
-            self._payload = payload
+        def __init__(self, payload, pkey_urlsafe, ckey_urlsafe):
+            self._payload = simplejson.dumps(
+                Record.bulk_payload(payload, pkey_urlsafe, ckey_urlsafe))
 
         def request_path(self):
             return '/api/bulkload'
 
         def payload(self):
-            return simplejson.dumps(self._payload)
+            return self._payload
 
         def content_type(self):
             return 'application/x-www-form-urlencoded'
@@ -131,21 +161,10 @@ class Bulkloader(object):
     def __init__(self, host, email, passwd):
         self.server = AppEngine(host, email, passwd)  
 
-    def load(self, payload):
-        return self.server.send(Bulkloader.Request(payload))
+    def load(self, payload, pkey_urlsafe, ckey_urlsafe):
+        return self.server.send(
+            Bulkloader.Request(payload, pkey_urlsafe, ckey_urlsafe))
 
-"""
-cache table
- - reckey
- - rechash
- - recjson
-
-tmp table
- - reckey
- - rehash
- - recjson
-
-"""
 def setupdb():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()
@@ -248,10 +267,17 @@ class NewRecords(object):
         self.insertsql = 'insert into %s values (?, ?, ?)' % CACHE_TABLE
         self.deltasql = "SELECT * FROM %s LEFT OUTER JOIN %s USING (reckey) WHERE %s.reckey is null"
         self.totalcount = 0
+        self.pkey_urlsafe = Publisher.key_by_name(
+            options.publisher_name).urlsafe()
+        self.ckey_urlsafe = Collection.key_by_name(
+            options.collection_name, options.publisher_name).urlsafe()
 
     def _insertchunk(self, cursor, recs, entities):
         logging.info('%s inserted' % self.totalcount)
-        print self.bulkloader.load(entities)
+        print self.bulkloader.load(
+            entities, 
+            self.pkey_urlsafe, 
+            self.ckey_urlsafe)
         cursor.executemany(self.insertsql, recs)
         self.conn.commit()
 

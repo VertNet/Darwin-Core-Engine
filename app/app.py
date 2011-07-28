@@ -85,9 +85,13 @@ class Publisher(BaseModel): # key_name=urlname
         return cls.get_by_urlname(cls.get_urlname(name))
 
     @classmethod
+    def key_by_name(cls, name):
+        return model.Key('Publisher', cls.get_urlname(name))
+
+    @classmethod
     def get_by_urlname(cls, urlname):
         """Queries the Publisher model by Publisher.urlname value."""
-        return model.Key('Publisher', urlname).get()
+        return cls.key_by_name.get()
 
 
 class Collection(BaseModel): # key_name=urlname, parent=Publisher
@@ -99,6 +103,17 @@ class Collection(BaseModel): # key_name=urlname, parent=Publisher
     updated = model.DateTimeProperty('u', auto_now=True)
     json = model.TextProperty('j', required=True) # JSON representation
 
+    @classmethod 
+    def isadmin(cls):
+        pass
+
+    @classmethod
+    def key_by_name(cls, name, publisher_name):
+        return model.Key(
+            'Collection', 
+            cls.get_urlname(name), 
+            parent=Publisher.key_by_name(publisher_name))
+        
     @classmethod
     def create(cls, name, publisher_key, admin, appver, appid):
         """Creates a new Collection instance."""
@@ -350,8 +365,8 @@ class BulkloadHandler(BaseHandler):
         if not user:
             self.error(401)
             return
-        logging.info(self.request.body)
-        self.response.out.write('hi')
+        #logging.info(self.request.body)
+        self.response.out.write(self.request.body)
 
 application = webapp.WSGIApplication(
          [('/admin/load', LoadTestData),
