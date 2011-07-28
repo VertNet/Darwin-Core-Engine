@@ -26,8 +26,6 @@ def date(time=False, asdays=False, short=False):
     if type(time) is int:   time = datetime.fromtimestamp(time)
     elif not time:          time = now
 
-    now = now.replace(tzinfo=time.tzinfo)
-
     if time > now:  past, diff = False, time - now
     else:           past, diff = True,  now - time
     seconds = diff.seconds
