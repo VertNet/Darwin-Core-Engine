@@ -42,15 +42,17 @@ class PostReceiveHandler(common.BaseHandler):
         for c in json['commits']:
             body += '%s\n%s' % (c['message'], c['url'])
             body += '\n%s (author)' % c['author']['name']
+            #body += '\n%s\n\n' % c['timestamp']
             body += '\n%s\n\n' % pretty.date(
-                datetime.strptime(
+                time=datetime.strptime(
                     reduce(
-                        lambda x,y: '%s-%s' % (x,y),
-                        c['timestamp'].split('-')[:-1]) , "%Y-%m-%w%dT%H:%M:%S"))
+                        lambda x,y: '%s-%s' % (x,y), 
+                        c['timestamp'].split('-')[:-1]),                                                 
+                    "%Y-%m-%dT%H:%M:%S")),
         mail.send_mail(
             sender="GitHub <commits@vert-net.appspotmail.com>",
-            to="vertnet-developers@googlegroups.com",
-            #to="eightysteele@gmail.com",
+            #to="vertnet-developers@googlegroups.com",
+            to="eightysteele@gmail.com",
             subject=title,
             body=body)     
 
