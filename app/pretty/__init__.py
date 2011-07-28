@@ -25,8 +25,8 @@ def date(time=False, asdays=False, short=False):
     if type(time) is int:   time = datetime.fromtimestamp(time)
     elif not time:          time = now
 
-    if time > now:  past, diff = False, time - now
-    else:           past, diff = True,  now - time
+    if time.replace(tzinfo=None) > now:  past, diff = False, time.replace(tzinfo=None) - now
+    else:           past, diff = True,  now - time.replace(tzinfo=None)
     seconds = diff.seconds
     days    = diff.days
 
