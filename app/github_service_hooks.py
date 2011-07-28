@@ -17,8 +17,6 @@ __author__ = "Aaron Steele"
 """This module handles post recieve service hooks from GitHub."""
 
 import common
-import pretty
-from dateutil.parser import parse
 
 from datetime import datetime
 import logging
@@ -32,8 +30,6 @@ from google.appengine.ext.webapp.util import run_wsgi_app
 
 class PostReceiveHandler(common.BaseHandler):    
     """Handler for GitHub Post Receive service hook.
-
-
     https://github.com/VertNet/Software/admin/hooks
     """
     def post(self):
@@ -45,12 +41,10 @@ class PostReceiveHandler(common.BaseHandler):
         for c in json['commits']:
             body += '%s\n%s' % (c['message'], c['url'])
             body += '\n%s (author)' % c['author']['name']
-            #body += '\n%s\n\n' % c['timestamp']
-            body += '\n%s\n\n' % pretty.date(parse(c['timestamp']))
+            body += '\n%s\n\n' % c['timestamp'] # TODO: user friendly date
         mail.send_mail(
             sender="GitHub <commits@vert-net.appspotmail.com>",
-            #to="vertnet-developers@googlegroups.com",
-            to="eightysteele@gmail.com",
+            to="vertnet-developers@googlegroups.com",
             subject=title,
             body=body)     
 
