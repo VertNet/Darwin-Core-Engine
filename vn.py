@@ -34,7 +34,17 @@ SCRIPT_DIR = os.path.join(DIR_PATH, 'vertnet', 'publishing', 'tools')
 EXTRA_PATHS = [
   DIR_PATH,
   os.path.join(DIR_PATH, 'lib', 'google_appengine'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'antlr3'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'django_0_96'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'fancy_urllib'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'ipaddr'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'protorpc'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'webob'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'yaml', 'lib'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'simplejson'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'graphy'),
   os.path.join(DIR_PATH, 'lib', 'dsplus'),
+  os.path.join(DIR_PATH, 'app'),
 ]
 
 SCRIPT_EXCEPTIONS = {
