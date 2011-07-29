@@ -15,20 +15,146 @@
 # limitations under the License.
 #
 
-"""This module runs VertNet actions and is based on the Google App Engine 
+"""This module runs VertNet actions and is based on the Google App Engine
 appcfg.py design."""
 
+# Standard Python modules
+import copy
+import csv
+import hashlib
 import logging
 import optparse
+import os
+import re
+import simplejson
+import sqlite3
 import sys
+import time
+import urllib
+from uuid import uuid4
 
-import google
-import ndb
+# VertNet app
+from app import Publisher, Collection, Record
+
+# Google App Engine
+from google.appengine.api import users
+
+# DatastorePlus
+from ndb import model
+from ndb import query
+
+def PrintUpdate(msg):
+    if verbosity > 0:
+        print >>sys.stderr, msg
+
+def StatusUpdate(msg):
+    PrintUpdate(msg)
 
 def _DeltasOptions(self, parser):
+
     parser.add_option('-b', '--batch_size', type='int', dest='batch_size',
                       default=25000, metavar='SIZE',
                       help='Batch size for processing.')
+
+    parser.add_option('-f', '--csv_file', type='string', dest='csv_file',
+                      metavar='FILE', help='Input CSV file.')
+
+    parser.add_option('-p', '--publisher_name', type='string', dest='publisher_name',
+                      metavar='NAME', help='VertNet publisher name.')
+
+    parser.add_option('-c', '--collection_name', type='string', dest='collection_name',
+                      metavar='NAME', help='VertNet publisher collection name.')
+
+
+
+class DeltaProcessor(object):
+
+    DB_FILE = 'bulk.sqlite3.db'
+    CACHE_TABLE = 'cache'
+    TMP_TABLE = 'tmp'
+
+    class TmpTable(object):
+
+        def __init__(self, conn, options, table):
+            self.conn = conn
+            self.options = options
+            self.table = table
+            self.insertsql = 'insert into %s values (?, ?, ?)' % self.table
+        
+        def _rowgenerator(self, rows):
+            count = 0
+            pkey = model.Key('Publisher', self.options.publisher_name)
+            ckey = model.Key('Collection', self.options.collection_name, parent=pkey)
+            for row in rows:
+                count += 1
+                try:
+                    reckey = model.Key('Record', row['occurrenceid'], parent=ckey).urlsafe()
+                    cols = row.keys()
+                    cols.sort()
+                    fields = [row[x].strip() for x in cols]
+                    line = reduce(lambda x,y: '%s%s' % (x, y), fields)
+                    rechash = hashlib.sha224(line).hexdigest()
+                    row['key_urlsafe'] = reckey
+                    recjson = simplejson.dumps(row)
+                    yield (reckey, rechash, recjson)
+                except Exception as (strerror):
+                    ErrorUpdate('Unable to process row %s - %s' % (count, strerror))
+
+        def _insertchunk(self, rows, cursor):
+            cursor.executemany(self.insertsql, self._rowgenerator(rows))
+            self.conn.commit()
+            StatusUpdate('%s...' % self.totalcount)
+
+        def insert(self):
+            csvfile = self.options.csv_file
+            StatusUpdate('Inserting %s to tmp table' % csvfile)
+            batchsize = int(self.options.batch_size)
+            rows = []
+            count = 0
+            self.totalcount = 0
+            chunkcount = 0
+            cursor = self.conn.cursor()
+            reader = csv.DictReader(open(csvfile, 'r'), skipinitialspace=True)
+            for row in reader:
+                if count >= batchsize:
+                    self.totalcount += count
+                    self._insertchunk(rows, cursor)
+                    count = 0
+                    rows = []
+                    chunkcount += 1
+                row = dict((k.lower(), v) for k,v in row.iteritems()) # lowercase all keys
+                rows.append(row)
+                count += 1
+
+            if count > 0:
+                self.totalcount += count
+                self._insertchunk(rows, cursor)
+
+            StatusUpdate('Done (inserted %s total)' % self.totalcount)
+    
+    @classmethod
+    def setupdb(cls):
+        conn = sqlite3.connect(cls.DB_FILE, check_same_thread=False)
+        c = conn.cursor()
+        # Creates the cache table:
+        c.execute('create table if not exists ' + cls.CACHE_TABLE +
+                  '(reckey text, ' +
+                  'rechash text, ' +
+                  'recjson text)')
+        # Creates the temporary table:
+        c.execute('create table if not exists ' + cls.TMP_TABLE +
+                  '(reckey text, ' +
+                  'rechash text, ' +
+                  'recjson text)')
+        # Clears all records from the temporary table:
+        c.execute('delete from %s' % cls.TMP_TABLE)
+        c.close()
+        return conn
+
+    def __init__(self, options):
+        self.options = options
+        self.conn = DeltaProcessor.setupdb()
+        self.TmpTable(self.conn, self.options, DeltaProcessor.TMP_TABLE).insert()
 
 class Action(object):
     """Contains information about a command line action."""
@@ -36,19 +162,19 @@ class Action(object):
     def __init__(self, function, usage, short_desc, long_desc='',
                  error_desc=None, options=lambda obj, parser: None,
                  uses_basepath=True):
-      """Initializer for the class attributes."""
-      self.function = function
-      self.usage = usage
-      self.short_desc = short_desc
-      self.long_desc = long_desc
-      self.error_desc = error_desc
-      self.options = options
-      self.uses_basepath = uses_basepath
+        """Initializer for the class attributes."""
+        self.function = function
+        self.usage = usage
+        self.short_desc = short_desc
+        self.long_desc = long_desc
+        self.error_desc = error_desc
+        self.options = options
+        self.uses_basepath = uses_basepath
 
     def __call__(self, appcfg):
-      """Invoke this Action on the specified Vn."""
-      method = getattr(appcfg, self.function)
-      return method()
+        """Invoke this Action on the specified Vn."""
+        method = getattr(appcfg, self.function)
+        return method()
 
 class Vn(object):
 
@@ -57,7 +183,7 @@ class Vn(object):
             function='Help',
             usage='%prog help <action>',
             short_desc='Print help for a specific action.',
-            uses_basepath=False),       
+            uses_basepath=False),
         deltas=Action(
             function='Deltas',
             usage='%prog [options] deltas <file>',
@@ -65,7 +191,7 @@ class Vn(object):
             short_desc='Calculate deltas for a file.',
             long_desc="""
 Specify a CSV file, and vn.py will generate deltas for new, updated
-and deleted records. Deltas will be saved to new files (new.csv, 
+and deleted records. Deltas will be saved to new files (new.csv,
 updated.csv, deleted.csv)."""))
 
     def __init__(self, argv, parser_class=optparse.OptionParser):
@@ -106,7 +232,6 @@ updated.csv, deleted.csv)."""))
 
     def Run(self):
         try:
-            logging.info('hi')
             self.action(self)
         except:
             return 1
@@ -126,6 +251,15 @@ updated.csv, deleted.csv)."""))
         action = self.actions[action]
         self.parser, unused_options = self._MakeSpecificParser(action)
         self._PrintHelpAndExit(exit_code=0)
+
+
+    def Deltas(self):
+        csv_file = self.options.csv_file
+        if not csv_file:
+            logging.critical('CSV required')
+            sys.exit(1)
+        StatusUpdate('Calculating deltas for %s' % csv_file)
+        DeltaProcessor(self.options)
 
     def _PrintHelpAndExit(self, exit_code=2):
         """Prints the parser's help message and exits the program."""
@@ -152,10 +286,10 @@ updated.csv, deleted.csv)."""))
 
     def _GetOptionParser(self):
         """Creates an OptionParser with generic usage and description strings."""
-        
+
         class Formatter(optparse.IndentedHelpFormatter):
             """Custom help formatter that does not reformat the description."""
-            
+
             def format_description(self, description):
                 """Very simple formatter."""
                 return description + '\n'
@@ -163,7 +297,7 @@ updated.csv, deleted.csv)."""))
         desc = self._GetActionDescriptions()
         desc = ('Action must be one of:\n%s'
                 'Use \'help <action>\' for a detailed description.') % desc
-        
+
         parser = self.parser_class(usage='%prog [options] <action>',
                                    description=desc,
                                    formatter=Formatter(),
@@ -176,7 +310,7 @@ updated.csv, deleted.csv)."""))
                           dest='verbose', default=1,
                           help='Print info level logs.')
 
-        
+
         return parser
 
 
