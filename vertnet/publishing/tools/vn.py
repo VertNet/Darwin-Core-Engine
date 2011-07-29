@@ -15,6 +15,9 @@
 # limitations under the License.
 #
 
+"""This module runs VertNet actions and is based on the Google App Engine 
+appcfg.py design."""
+
 import logging
 import optparse
 import sys
