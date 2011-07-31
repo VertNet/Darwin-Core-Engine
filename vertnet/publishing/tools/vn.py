@@ -131,7 +131,69 @@ class DeltaProcessor(object):
                 self._insertchunk(rows, cursor)
 
             StatusUpdate('Done (inserted %s total)' % self.totalcount)
-    
+
+    class NewRecords(object):
+
+        def __init__(self, conn, options, table):
+            self.conn = conn
+            self.options = options
+            self.table = table
+            self.insertsql = 'insert into %s values (?, ?, ?)' % CACHE_TABLE
+            self.deltasql = "SELECT * FROM %s LEFT OUTER JOIN %s USING (reckey) WHERE %s.reckey is null"
+            self.totalcount = 0
+            self.pkey_urlsafe = Publisher.key_by_name(
+                options.publisher_name).urlsafe()
+            self.ckey_urlsafe = Collection.key_by_name(
+                options.collection_name, options.publisher_name).urlsafe()
+
+        def _insertchunk(self, cursor, recs, entities):
+            logging.info('%s inserted' % self.totalcount)
+            print self.bulkloader.load(
+                entities, 
+                self.pkey_urlsafe, 
+                self.ckey_urlsafe)
+            cursor.executemany(self.insertsql, recs)
+            self.conn.commit()
+
+        def execute(self):
+            """
+            Payload spec: https://gist.github.com/1108715
+            """
+            logging.info("Checking for new records")
+
+            batchsize = int(self.options.batchsize)
+            cursor = self.conn.cursor()
+            newrecs = cursor.execute(self.deltasql % (TMP_TABLE, CACHE_TABLE, CACHE_TABLE))
+            entities = []
+            recs = []
+            count = 0
+            self.totalcount = 0
+
+            for row in newrecs.fetchall():
+                if count >= batchsize:
+                    self.totalcount += count
+                    self._insertchunk(cursor, recs, entities)
+                    count = 0
+                    recs = []
+                    entities = []
+
+                count += 1
+
+                reckey = row[0]
+                rechash = row[1]
+                recjson = row[2]
+
+                entity = simplejson.loads(recjson)
+                entities.append(entity)
+                recs.append((reckey, rechash, recjson))
+
+            if count > 0:
+                self.totalcount += count
+                self._insertchunk(cursor, recs, entities)
+
+            self.conn.commit()
+            logging.info('INSERT: %s records inserted' % self.totalcount)
+
     @classmethod
     def setupdb(cls):
         conn = sqlite3.connect(cls.DB_FILE, check_same_thread=False)
