@@ -50,6 +50,9 @@ def PrintUpdate(msg):
 def StatusUpdate(msg):
     PrintUpdate(msg)
 
+def _ReportOptions(self, parser):
+    pass
+
 def _DeltasOptions(self, parser):
 
     parser.add_option('-b', '--batch_size', type='int', dest='batch_size',
@@ -64,7 +67,6 @@ def _DeltasOptions(self, parser):
 
     parser.add_option('-c', '--collection_name', type='string', dest='collection_name',
                       metavar='NAME', help='VertNet publisher collection name.')
-
 
 
 class DeltaProcessor(object):
@@ -107,7 +109,7 @@ class DeltaProcessor(object):
 
         def insert(self):
             csvfile = self.options.csv_file
-            StatusUpdate('Inserting %s to tmp table' % csvfile)
+            StatusUpdate('Processing incoming records')
             batchsize = int(self.options.batch_size)
             rows = []
             count = 0
@@ -130,40 +132,38 @@ class DeltaProcessor(object):
                 self.totalcount += count
                 self._insertchunk(rows, cursor)
 
-            StatusUpdate('Done (inserted %s total)' % self.totalcount)
+            StatusUpdate('Processed %s records' % self.totalcount)
 
     class NewRecords(object):
 
-        def __init__(self, conn, options, table):
+        def __init__(self, conn, options):
             self.conn = conn
             self.options = options
-            self.table = table
-            self.insertsql = 'insert into %s values (?, ?, ?)' % CACHE_TABLE
-            self.deltasql = "SELECT * FROM %s LEFT OUTER JOIN %s USING (reckey) WHERE %s.reckey is null"
+            self.insertsql = 'insert into cache values (?, ?, ?, ?)' 
+            self.deltasql = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is null"
             self.totalcount = 0
+            reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
+            columns = [x.lower() for x in reader.next().keys()]            
+            columns.append('key_urlsafe')
+            self.writer = csv.DictWriter(open('new.csv', 'w'), columns, quoting=csv.QUOTE_ALL)
+            self.writer.writeheader()
             self.pkey_urlsafe = Publisher.key_by_name(
                 options.publisher_name).urlsafe()
             self.ckey_urlsafe = Collection.key_by_name(
                 options.collection_name, options.publisher_name).urlsafe()
 
         def _insertchunk(self, cursor, recs, entities):
-            logging.info('%s inserted' % self.totalcount)
-            print self.bulkloader.load(
-                entities, 
-                self.pkey_urlsafe, 
-                self.ckey_urlsafe)
+            self.writer.writerows(entities)
             cursor.executemany(self.insertsql, recs)
             self.conn.commit()
+            StatusUpdate('%s...' % self.totalcount)
 
         def execute(self):
-            """
-            Payload spec: https://gist.github.com/1108715
-            """
-            logging.info("Checking for new records")
+            StatusUpdate("Checking for new records")
 
-            batchsize = int(self.options.batchsize)
+            batchsize = int(self.options.batch_size)
             cursor = self.conn.cursor()
-            newrecs = cursor.execute(self.deltasql % (TMP_TABLE, CACHE_TABLE, CACHE_TABLE))
+            newrecs = cursor.execute(self.deltasql)
             entities = []
             recs = []
             count = 0
@@ -185,14 +185,149 @@ class DeltaProcessor(object):
 
                 entity = simplejson.loads(recjson)
                 entities.append(entity)
-                recs.append((reckey, rechash, recjson))
-
+                recs.append((reckey, rechash, recjson, 'new'))
+            
             if count > 0:
                 self.totalcount += count
                 self._insertchunk(cursor, recs, entities)
 
             self.conn.commit()
-            logging.info('INSERT: %s records inserted' % self.totalcount)
+            if self.totalcount > 0:
+                StatusUpdate('%s new records saved to new.csv' % self.totalcount)
+            else:
+                os.remove('new.csv')
+                StatusUpdate('No new records')
+
+
+
+    
+    class UpdatedRecords(object):
+        def __init__(self, conn, options):
+            self.conn = conn
+            self.options = options
+            self.updatesql = 'update cache set rechash=?, recjson=? , recstate=? where reckey=?'
+            self.deltasql = 'SELECT c.reckey, t.rechash, t.recjson FROM tmp as t, cache as c WHERE t.reckey = c.reckey AND t.rechash <> c.rechash'        
+            reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
+            columns = [x.lower() for x in reader.next().keys()]            
+            columns.append('key_urlsafe')
+            self.writer = csv.DictWriter(open('updated.csv', 'w'), columns, quoting=csv.QUOTE_ALL)
+            self.writer.writeheader()
+
+        def _updatechunk(self, cursor, recs, entities):
+            """Bulk inserts docs to couchdb and updates cache table doc revision."""
+            self.writer.writerows(entities)
+            cursor.executemany(self.updatesql, recs)
+            self.conn.commit()
+            StatusUpdate('%s...' % self.totalcount)
+
+        def execute(self):
+            StatusUpdate("Checking for updated records")
+            batchsize = int(self.options.batch_size)
+            cursor = self.conn.cursor()
+            updatedrecs = cursor.execute(self.deltasql)
+            entities = []
+            recs = []
+            count = 0
+            self.totalcount = 0
+
+            for row in updatedrecs.fetchall():
+                if count >= batchsize:
+                    self._updatechunk(cursor, recs, entities)
+                    self.totalcount += count
+                    count = 0
+                    entities = []
+                    recs = []
+                count += 1
+                reckey = row[0]
+                rechash = row[1] # Note: This is the new hash from tmp table.
+                recjson = row[2]
+
+                entity = simplejson.loads(recjson)
+                entities.append(entity)
+                
+                recs.append((rechash, recjson, 'updated', reckey))
+
+            if count > 0:
+                self.totalcount += count
+                self._updatechunk(cursor, recs, entities)
+
+            self.conn.commit()
+            if self.totalcount > 0:
+                StatusUpdate('%s updated records saved to updated.csv' % self.totalcount)
+            else:
+                os.remove('updated.csv')
+                StatusUpdate('No updated records')
+
+    class DeletedRecords(object):
+        def __init__(self, conn, options):
+            self.conn = conn
+            self.options = options
+            self.deletesql = 'delete from cache where reckey=?'
+            self.updatesql = 'update cache set recstate=? where reckey=?'
+            self.deltasql = 'SELECT * FROM cache LEFT OUTER JOIN tmp USING (reckey) WHERE tmp.reckey is null'
+            columns = ['key_urlsafe']
+            self.writer = csv.DictWriter(open('deleted.csv', 'w'), columns, quoting=csv.QUOTE_ALL)
+            self.writer.writeheader()
+
+        def _deletechunk(self, cursor, recs, entities):
+            cursor.executemany(self.updatesql, recs)
+            self.conn.commit()
+            self.writer.writerows(entities)
+            StatusUpdate('%s...' % self.totalcount)
+
+        def execute(self):
+            StatusUpdate("Checking for deleted records")
+            batchsize = int(self.options.batch_size)
+            cursor = self.conn.cursor()
+            deletes = cursor.execute(self.deltasql)
+            count = 0
+            self.totalcount = 0
+            entities = []
+            recs = []
+
+            for row in deletes.fetchall():
+                if count >= batchsize:
+                    self._deletechunk(cursor, recs, entities)
+                    self.totalcount += count
+                    count = 0
+                    entities = []
+                    recs = []
+                count += 1
+                reckey = row[0]
+                recs.append(('deleted', reckey))
+                entities.append(dict(key_urlsafe=reckey))
+
+            if count > 0:
+                self.totalcount += count
+                self._deletechunk(cursor, recs, entities)
+
+            self.conn.commit()
+            if self.totalcount > 0:
+                StatusUpdate('%s deleted records saved to deleted.csv' % self.totalcount)
+            else:
+                os.remove('deleted.csv')
+                StatusUpdate('No deleted records')
+
+
+    class Report(object):
+        def __init__(self, conn, options):
+            self.conn = conn
+            self.options = options
+            columns = ['recstate', 'reckey', 'rechash', 'recjson']
+            self.writer = csv.DictWriter(open('report.csv', 'w'), columns, quoting=csv.QUOTE_ALL)
+            self.writer.writeheader()
+        
+        def execute(self):
+            StatusUpdate('Creating report')
+            cursor = self.conn.cursor()            
+            for row in cursor.execute('select reckey, rechash, recjson, recstate from cache'):
+                self.writer.writerow(dict(
+                        reckey=row[0],
+                        rechash=row[1],
+                        recjson=row[2],
+                        recstate=row[3]))
+            StatusUpdate('Report saved to report.csv')
+                                    
 
     @classmethod
     def setupdb(cls):
@@ -202,7 +337,8 @@ class DeltaProcessor(object):
         c.execute('create table if not exists ' + cls.CACHE_TABLE +
                   '(reckey text, ' +
                   'rechash text, ' +
-                  'recjson text)')
+                  'recjson text, ' +
+                  'recstate text)')
         # Creates the temporary table:
         c.execute('create table if not exists ' + cls.TMP_TABLE +
                   '(reckey text, ' +
@@ -216,7 +352,16 @@ class DeltaProcessor(object):
     def __init__(self, options):
         self.options = options
         self.conn = DeltaProcessor.setupdb()
+
+    def deltas(self):
+        """Calculates deltas and stores in sqlite."""
         self.TmpTable(self.conn, self.options, DeltaProcessor.TMP_TABLE).insert()
+        self.NewRecords(self.conn, self.options).execute()
+        self.UpdatedRecords(self.conn, self.options).execute()
+        self.DeletedRecords(self.conn, self.options).execute()
+
+    def report(self):
+        self.Report(self.conn, self.options).execute()
 
 class Action(object):
     """Contains information about a command line action."""
@@ -254,7 +399,14 @@ class Vn(object):
             long_desc="""
 Specify a CSV file, and vn.py will generate deltas for new, updated
 and deleted records. Deltas will be saved to new files (new.csv,
-updated.csv, deleted.csv)."""))
+updated.csv, deleted.csv)."""),
+        report=Action(
+            function='Report',
+            usage='%prog [options] report',
+            options=_ReportOptions,
+            short_desc='Creates a report.',
+            long_desc="""Creates a report that details new, updated
+and deleted records."""))
 
     def __init__(self, argv, parser_class=optparse.OptionParser):
         self.parser_class = parser_class
@@ -314,6 +466,9 @@ updated.csv, deleted.csv)."""))
         self.parser, unused_options = self._MakeSpecificParser(action)
         self._PrintHelpAndExit(exit_code=0)
 
+    def Report(self):
+        StatusUpdate('Creating a report')
+        DeltaProcessor(self.options).report()
 
     def Deltas(self):
         csv_file = self.options.csv_file
@@ -321,7 +476,7 @@ updated.csv, deleted.csv)."""))
             logging.critical('CSV required')
             sys.exit(1)
         StatusUpdate('Calculating deltas for %s' % csv_file)
-        DeltaProcessor(self.options)
+        DeltaProcessor(self.options).deltas()
 
     def _PrintHelpAndExit(self, exit_code=2):
         """Prints the parser's help message and exits the program."""
