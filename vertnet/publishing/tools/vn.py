@@ -56,7 +56,7 @@ def _ReportOptions(self, parser):
 def _DeltasOptions(self, parser):
 
     parser.add_option('-b', '--batch_size', type='int', dest='batch_size',
-                      default=25000, metavar='SIZE',
+                      default=10000, metavar='SIZE',
                       help='Batch size for processing.')
 
     parser.add_option('-f', '--csv_file', type='string', dest='csv_file',
@@ -86,7 +86,7 @@ class DeltaProcessor(object):
         def _rowgenerator(self, rows):
             count = 0
             pkey = model.Key('Publisher', self.options.publisher_name)
-            ckey = model.Key('Collection', self.options.collection_name, parent=pkey)
+            ckey = model.Key('Collection', self.options.collection_name, parent=pkey)            
             for row in rows:
                 count += 1
                 try:
@@ -117,6 +117,9 @@ class DeltaProcessor(object):
             chunkcount = 0
             cursor = self.conn.cursor()
             reader = csv.DictReader(open(csvfile, 'r'), skipinitialspace=True)
+            if 'occurrenceid' not in reader.fieldnames:
+                logging.critical('occurrenceid required in csv file')
+                sys.exit(1)
             for row in reader:
                 if count >= batchsize:
                     self.totalcount += count
@@ -145,15 +148,12 @@ class DeltaProcessor(object):
             reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
             columns.append('key_urlsafe')
-            self.writer = csv.DictWriter(open('new.csv', 'w'), columns, quoting=csv.QUOTE_ALL)
-            self.writer.writeheader()
             self.pkey_urlsafe = Publisher.key_by_name(
                 options.publisher_name).urlsafe()
             self.ckey_urlsafe = Collection.key_by_name(
                 options.collection_name, options.publisher_name).urlsafe()
 
         def _insertchunk(self, cursor, recs, entities):
-            self.writer.writerows(entities)
             cursor.executemany(self.insertsql, recs)
             self.conn.commit()
             StatusUpdate('%s...' % self.totalcount)
@@ -193,13 +193,9 @@ class DeltaProcessor(object):
 
             self.conn.commit()
             if self.totalcount > 0:
-                StatusUpdate('%s new records saved to new.csv' % self.totalcount)
+                StatusUpdate('%s new records found' % self.totalcount)
             else:
-                os.remove('new.csv')
-                StatusUpdate('No new records')
-
-
-
+                StatusUpdate('No new records found')
     
     class UpdatedRecords(object):
         def __init__(self, conn, options):
@@ -210,12 +206,9 @@ class DeltaProcessor(object):
             reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
             columns.append('key_urlsafe')
-            self.writer = csv.DictWriter(open('updated.csv', 'w'), columns, quoting=csv.QUOTE_ALL)
-            self.writer.writeheader()
 
         def _updatechunk(self, cursor, recs, entities):
             """Bulk inserts docs to couchdb and updates cache table doc revision."""
-            self.writer.writerows(entities)
             cursor.executemany(self.updatesql, recs)
             self.conn.commit()
             StatusUpdate('%s...' % self.totalcount)
@@ -253,10 +246,9 @@ class DeltaProcessor(object):
 
             self.conn.commit()
             if self.totalcount > 0:
-                StatusUpdate('%s updated records saved to updated.csv' % self.totalcount)
+                StatusUpdate('%s updated records found' % self.totalcount)
             else:
-                os.remove('updated.csv')
-                StatusUpdate('No updated records')
+                StatusUpdate('No updated records found')
 
     class DeletedRecords(object):
         def __init__(self, conn, options):
@@ -266,13 +258,10 @@ class DeltaProcessor(object):
             self.updatesql = 'update cache set recstate=? where reckey=?'
             self.deltasql = 'SELECT * FROM cache LEFT OUTER JOIN tmp USING (reckey) WHERE tmp.reckey is null'
             columns = ['key_urlsafe']
-            self.writer = csv.DictWriter(open('deleted.csv', 'w'), columns, quoting=csv.QUOTE_ALL)
-            self.writer.writeheader()
 
         def _deletechunk(self, cursor, recs, entities):
             cursor.executemany(self.updatesql, recs)
             self.conn.commit()
-            self.writer.writerows(entities)
             StatusUpdate('%s...' % self.totalcount)
 
         def execute(self):
@@ -303,10 +292,9 @@ class DeltaProcessor(object):
 
             self.conn.commit()
             if self.totalcount > 0:
-                StatusUpdate('%s deleted records saved to deleted.csv' % self.totalcount)
+                StatusUpdate('%s deleted records found' % self.totalcount)
             else:
-                os.remove('deleted.csv')
-                StatusUpdate('No deleted records')
+                StatusUpdate('No deleted records found')
 
 
     class Report(object):
