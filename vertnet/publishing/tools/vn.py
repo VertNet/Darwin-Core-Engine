@@ -18,6 +18,10 @@
 """This module runs VertNet actions and is based on the Google App Engine
 appcfg.py design."""
 
+# Hack for testing
+global verbosity
+verbosity = 1
+
 # Standard Python modules
 import copy
 import csv
@@ -81,7 +85,7 @@ class DeltaProcessor(object):
             self.conn = conn
             self.options = options
             self.table = table
-            self.insertsql = 'insert into %s values (?, ?, ?)' % self.table
+            self.insertsql = 'insert into tmp values (?, ?, ?)'
         
         def _rowgenerator(self, rows):
             count = 0
@@ -144,6 +148,7 @@ class DeltaProcessor(object):
             self.options = options
             self.insertsql = 'insert into cache values (?, ?, ?, ?)' 
             self.deltasql = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is null"
+            self.deltasql_deleted = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is not null and cache.recstate = 'deleted'"
             self.totalcount = 0
             reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
@@ -153,18 +158,21 @@ class DeltaProcessor(object):
             self.ckey_urlsafe = Collection.key_by_name(
                 options.collection_name, options.publisher_name).urlsafe()
 
-        def _insertchunk(self, cursor, recs, entities):
+        def _insertchunk(self, cursor, recs):
             cursor.executemany(self.insertsql, recs)
+            self.conn.commit()
+            StatusUpdate('%s...' % self.totalcount)
+
+        def _insertchunk_update(self, cursor, recs):
+            cursor.executemany('update cache set rechash=?, recjson=? , recstate=? where reckey=?', recs)
             self.conn.commit()
             StatusUpdate('%s...' % self.totalcount)
 
         def execute(self):
             StatusUpdate("Checking for new records")
-
             batchsize = int(self.options.batch_size)
             cursor = self.conn.cursor()
             newrecs = cursor.execute(self.deltasql)
-            entities = []
             recs = []
             count = 0
             self.totalcount = 0
@@ -172,24 +180,34 @@ class DeltaProcessor(object):
             for row in newrecs.fetchall():
                 if count >= batchsize:
                     self.totalcount += count
-                    self._insertchunk(cursor, recs, entities)
+                    self._insertchunk(cursor, recs)
                     count = 0
                     recs = []
-                    entities = []
-
                 count += 1
-
                 reckey = row[0]
                 rechash = row[1]
                 recjson = row[2]
-
-                entity = simplejson.loads(recjson)
-                entities.append(entity)
                 recs.append((reckey, rechash, recjson, 'new'))
-            
             if count > 0:
                 self.totalcount += count
-                self._insertchunk(cursor, recs, entities)
+                self._insertchunk(cursor, recs)
+
+            # Handles deleted records in cache table:
+            newrecs = cursor.execute(self.deltasql_deleted)
+            for row in newrecs.fetchall():
+                if count >= batchsize:
+                    self.totalcount += count
+                    self._insertchunk_update(cursor, recs)
+                    count = 0
+                    recs = []
+                count += 1
+                reckey = row[0]
+                rechash = row[1]
+                recjson = row[2]
+                recs.append((rechash, recjson, 'new', reckey))            
+            if count > 0:
+                self.totalcount += count
+                self._insertchunk_update(cursor, recs)
 
             self.conn.commit()
             if self.totalcount > 0:
@@ -207,7 +225,7 @@ class DeltaProcessor(object):
             columns = [x.lower() for x in reader.next().keys()]            
             columns.append('key_urlsafe')
 
-        def _updatechunk(self, cursor, recs, entities):
+        def _updatechunk(self, cursor, recs):
             """Bulk inserts docs to couchdb and updates cache table doc revision."""
             cursor.executemany(self.updatesql, recs)
             self.conn.commit()
@@ -218,7 +236,6 @@ class DeltaProcessor(object):
             batchsize = int(self.options.batch_size)
             cursor = self.conn.cursor()
             updatedrecs = cursor.execute(self.deltasql)
-            entities = []
             recs = []
             count = 0
             self.totalcount = 0
@@ -228,21 +245,16 @@ class DeltaProcessor(object):
                     self._updatechunk(cursor, recs, entities)
                     self.totalcount += count
                     count = 0
-                    entities = []
                     recs = []
                 count += 1
                 reckey = row[0]
                 rechash = row[1] # Note: This is the new hash from tmp table.
                 recjson = row[2]
-
-                entity = simplejson.loads(recjson)
-                entities.append(entity)
-                
                 recs.append((rechash, recjson, 'updated', reckey))
 
             if count > 0:
                 self.totalcount += count
-                self._updatechunk(cursor, recs, entities)
+                self._updatechunk(cursor, recs)
 
             self.conn.commit()
             if self.totalcount > 0:
@@ -259,7 +271,7 @@ class DeltaProcessor(object):
             self.deltasql = 'SELECT * FROM cache LEFT OUTER JOIN tmp USING (reckey) WHERE tmp.reckey is null'
             columns = ['key_urlsafe']
 
-        def _deletechunk(self, cursor, recs, entities):
+        def _deletechunk(self, cursor, recs):
             cursor.executemany(self.updatesql, recs)
             self.conn.commit()
             StatusUpdate('%s...' % self.totalcount)
@@ -271,24 +283,21 @@ class DeltaProcessor(object):
             deletes = cursor.execute(self.deltasql)
             count = 0
             self.totalcount = 0
-            entities = []
             recs = []
 
             for row in deletes.fetchall():
                 if count >= batchsize:
-                    self._deletechunk(cursor, recs, entities)
+                    self._deletechunk(cursor, recs)
                     self.totalcount += count
                     count = 0
-                    entities = []
                     recs = []
                 count += 1
                 reckey = row[0]
                 recs.append(('deleted', reckey))
-                entities.append(dict(key_urlsafe=reckey))
 
             if count > 0:
                 self.totalcount += count
-                self._deletechunk(cursor, recs, entities)
+                self._deletechunk(cursor, recs)
 
             self.conn.commit()
             if self.totalcount > 0:
@@ -386,8 +395,7 @@ class Vn(object):
             short_desc='Calculate deltas for a file.',
             long_desc="""
 Specify a CSV file, and vn.py will generate deltas for new, updated
-and deleted records. Deltas will be saved to new files (new.csv,
-updated.csv, deleted.csv)."""),
+and deleted records. Deltas will be persisted via sqlite3."""),
         report=Action(
             function='Report',
             usage='%prog [options] report',

@@ -5,6 +5,7 @@
 
 # Logs and databases #
 ######################
+*.csv
 *.log
 *.sql
 *.sqlite3.db
@@ -23,3 +24,5 @@
 *.*~
 .#*
 *#*
+
+context_switch.txt

@@ -28,11 +28,10 @@ if version_tuple < (2, 4):
                    'version 2.5 or greater.\n' % version_tuple)
   sys.exit(1)
 
-DIR_PATH = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
+DIR_PATH = os.path.abspath(os.path.dirname(os.path.realpath('../../')))
 SCRIPT_DIR = os.path.join(DIR_PATH, 'vertnet', 'publishing', 'tools')
 
 EXTRA_PATHS = [
-  DIR_PATH,
   SCRIPT_DIR,
   os.path.join(DIR_PATH, 'lib', 'google_appengine'),
   os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'antlr3'),
@@ -54,14 +53,3 @@ SCRIPT_EXCEPTIONS = {
 def fix_sys_path():
   """Fix the sys.path to include our extra paths."""
   sys.path = EXTRA_PATHS + sys.path
-
-def run_file(file_path, globals_, script_dir=SCRIPT_DIR):
-  """Execute the file at the specified path with the passed-in globals."""
-  fix_sys_path()
-  script_name = os.path.basename(file_path)
-  script_name = SCRIPT_EXCEPTIONS.get(script_name, script_name)
-  script_path = os.path.join(script_dir, script_name)
-  execfile(script_path, globals_)
-
-if __name__ == '__main__':
-  run_file(__file__, globals())
