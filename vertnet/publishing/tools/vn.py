@@ -30,8 +30,10 @@ import logging
 import optparse
 import os
 import re
+import shlex
 import simplejson
 import sqlite3
+import subprocess
 import sys
 import time
 import urllib
@@ -54,24 +56,27 @@ def PrintUpdate(msg):
 def StatusUpdate(msg):
     PrintUpdate(msg)
 
+def _BulkloadOptions(self, parser):
+   parser.add_option('-b', '--config_file', type='string', dest='config_file',
+                     metavar='FILE', help='Bulkload YAML config file.')
+   parser.add_option('-b', '--filename', type='string', dest='filename',
+                     metavar='FILE', help='CSV file with data to bulkload.')                      
+   parser.add_option('-b', '--url', type='string', dest='url',
+                     help='URL endpoint to /remote_api to bulkload to.')                          
+
 def _ReportOptions(self, parser):
     pass
 
 def _DeltasOptions(self, parser):
-
     parser.add_option('-b', '--batch_size', type='int', dest='batch_size',
                       default=10000, metavar='SIZE',
                       help='Batch size for processing.')
-
     parser.add_option('-f', '--csv_file', type='string', dest='csv_file',
                       metavar='FILE', help='Input CSV file.')
-
     parser.add_option('-p', '--publisher_name', type='string', dest='publisher_name',
                       metavar='NAME', help='VertNet publisher name.')
-
     parser.add_option('-c', '--collection_name', type='string', dest='collection_name',
                       metavar='NAME', help='VertNet publisher collection name.')
-
 
 class DeltaProcessor(object):
 
@@ -100,7 +105,6 @@ class DeltaProcessor(object):
                     fields = [row[x].strip() for x in cols]
                     line = reduce(lambda x,y: '%s%s' % (x, y), fields)
                     rechash = hashlib.sha224(line).hexdigest()
-                    row['key_urlsafe'] = reckey
                     recjson = simplejson.dumps(row)
                     yield (reckey, rechash, recjson)
                 except Exception as (strerror):
@@ -121,7 +125,7 @@ class DeltaProcessor(object):
             chunkcount = 0
             cursor = self.conn.cursor()
             reader = csv.DictReader(open(csvfile, 'r'), skipinitialspace=True)
-            if 'occurrenceid' not in reader.fieldnames:
+            if 'occurrenceid' not in [x.lower() for x in reader.fieldnames]:
                 logging.critical('occurrenceid required in csv file')
                 sys.exit(1)
             for row in reader:
@@ -152,7 +156,6 @@ class DeltaProcessor(object):
             self.totalcount = 0
             reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
-            columns.append('key_urlsafe')
             self.pkey_urlsafe = Publisher.key_by_name(
                 options.publisher_name).urlsafe()
             self.ckey_urlsafe = Collection.key_by_name(
@@ -192,6 +195,8 @@ class DeltaProcessor(object):
                 self.totalcount += count
                 self._insertchunk(cursor, recs)
 
+            count = 0
+
             # Handles deleted records in cache table:
             newrecs = cursor.execute(self.deltasql_deleted)
             for row in newrecs.fetchall():
@@ -223,7 +228,6 @@ class DeltaProcessor(object):
             self.deltasql = 'SELECT c.reckey, t.rechash, t.recjson FROM tmp as t, cache as c WHERE t.reckey = c.reckey AND t.rechash <> c.rechash'        
             reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
-            columns.append('key_urlsafe')
 
         def _updatechunk(self, cursor, recs):
             """Bulk inserts docs to couchdb and updates cache table doc revision."""
@@ -269,7 +273,6 @@ class DeltaProcessor(object):
             self.deletesql = 'delete from cache where reckey=?'
             self.updatesql = 'update cache set recstate=? where reckey=?'
             self.deltasql = 'SELECT * FROM cache LEFT OUTER JOIN tmp USING (reckey) WHERE tmp.reckey is null'
-            columns = ['key_urlsafe']
 
         def _deletechunk(self, cursor, recs):
             cursor.executemany(self.updatesql, recs)
@@ -311,7 +314,7 @@ class DeltaProcessor(object):
             self.conn = conn
             self.options = options
             columns = ['recstate', 'reckey', 'rechash', 'recjson']
-            self.writer = csv.DictWriter(open('report.csv', 'w'), columns, quoting=csv.QUOTE_ALL)
+            self.writer = csv.DictWriter(open('report.csv', 'w'), columns, quoting=csv.QUOTE_MINIMAL)
             self.writer.writeheader()
         
         def execute(self):
@@ -324,7 +327,6 @@ class DeltaProcessor(object):
                         recjson=row[2],
                         recstate=row[3]))
             StatusUpdate('Report saved to report.csv')
-                                    
 
     @classmethod
     def setupdb(cls):
@@ -360,6 +362,31 @@ class DeltaProcessor(object):
     def report(self):
         self.Report(self.conn, self.options).execute()
 
+class Bulkload(object):
+    def __init__(self, options):
+        StatusUpdate('Boom!')
+        self.options = options
+            
+    def execute(self):
+        StatusUpdate('Bulkloading')
+        # Bulkload Record
+        command_line = 'appcfg.py upload_data --config_file=%s --filename=%s --kind Record --url=%s' % \
+            (self.options.config_file, self.options.filename, self.options.url)
+        StatusUpdate(command_line)
+        args = shlex.split(command_line)
+        try:
+            retcode = subprocess.call(args)            
+        except Exception as e:
+            StatusUpdate(str(e))
+        StatusUpdate('retcode=%s' % retcode)
+        # Bulkload RecordIndex
+        command_line = 'appcfg.py upload_data --config_file=%s --filename=%s --kind RecordIndex --url=%s' % \
+            (self.options.config_file, self.options.filename, self.options.url)
+        StatusUpdate(command_line)
+        args = shlex.split(command_line)
+        subprocess.call(args)                        
+
+
 class Action(object):
     """Contains information about a command line action."""
 
@@ -388,7 +415,7 @@ class Vn(object):
             usage='%prog help <action>',
             short_desc='Print help for a specific action.',
             uses_basepath=False),
-        deltas=Action(
+        deltas=Action( 
             function='Deltas',
             usage='%prog [options] deltas <file>',
             options=_DeltasOptions,
@@ -396,6 +423,14 @@ class Vn(object):
             long_desc="""
 Specify a CSV file, and vn.py will generate deltas for new, updated
 and deleted records. Deltas will be persisted via sqlite3."""),
+        bulkload=Action( 
+            function='Bulkload',
+            usage='%prog [options] bulkload <file>',
+            options=_BulkloadOptions,
+            short_desc='Bulkloads report.csv to Google App Engine datastore.',
+            long_desc="""
+Specify a CSV file and a URL, and vn.py will bulkload it to the 
+Google App Engine datastore."""),
         report=Action(
             function='Report',
             usage='%prog [options] report',
@@ -461,6 +496,10 @@ and deleted records."""))
         action = self.actions[action]
         self.parser, unused_options = self._MakeSpecificParser(action)
         self._PrintHelpAndExit(exit_code=0)
+
+    def Bulkload(self):
+        StatusUpdate('Starting bulkload')
+        Bulkload(self.options).execute()        
 
     def Report(self):
         StatusUpdate('Creating a report')

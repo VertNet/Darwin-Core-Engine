@@ -10,6 +10,8 @@
 *.sql
 *.sqlite3.db
 *.sqlite
+bulkloader-log*
+bulkloader-progress*
 
 # IDE files #
 #############
@@ -25,4 +27,6 @@
 .#*
 *#*
 
-context_switch.txt
+context.txt
+splitcsv.py
+clean_files.sh
