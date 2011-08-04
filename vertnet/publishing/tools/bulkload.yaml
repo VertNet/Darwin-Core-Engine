@@ -1,0 +1,41 @@
+# Configuration for bulkloding Record and RecordIndex to App Engine datastore.
+
+python_preamble:
+- import: base64
+- import: re
+- import: google.appengine.ext.bulkload.transform
+- import: google.appengine.ext.bulkload.bulkloader_wizard
+- import: google.appengine.ext.db
+- import: google.appengine.api.datastore
+- import: google.appengine.api.users
+- import: bulkload_helper
+
+transformers:
+
+- kind: Record
+  connector: csv
+  connector_options:
+    encoding: utf_8
+  
+  property_map:
+    - property: __key__
+      external_name: reckey
+      #export_transform: datastore.Key.name
+      import_transform: bulkload_helper.create_record_key()  
+
+    - property: json
+      external_name: recjson
+      
+- kind: RecordIndex
+  connector: csv
+  connector_options:
+    encoding: utf_8
+  
+  property_map:
+    - property: __key__
+      external_name: reckey
+      import_transform: bulkload_helper.create_record_index_key()
+                            
+    - property: corpus
+      external_name: recjson
+      import_transform: bulkload_helper.get_corpus_list()

@@ -28,7 +28,9 @@ if version_tuple < (2, 4):
                    'version 2.5 or greater.\n' % version_tuple)
   sys.exit(1)
 
-DIR_PATH = os.path.abspath(os.path.dirname(os.path.realpath('../../')))
+DIR_PATH = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
+DIR_PATH = reduce(lambda x,y: '%s%s%s' % (x,os.path.sep,y), DIR_PATH.split(os.path.sep)[:-3])
+print 'DIR_PATH=%s' % DIR_PATH
 SCRIPT_DIR = os.path.join(DIR_PATH, 'vertnet', 'publishing', 'tools')
 
 EXTRA_PATHS = [
