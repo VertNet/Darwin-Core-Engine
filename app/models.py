@@ -164,7 +164,7 @@ class Record(BaseModel): # key_name=record.occurrenceid, parent=Collection
     
 class RecordIndex(model.Expando): # parent=Record
     """Index relation for Record."""
-    corpus = model.StringProperty('c', repeated=True) # full text
+    corpus = model.StringProperty(repeated=True) # full text
 
     @classmethod
     def create(cls, rec, collection_key):

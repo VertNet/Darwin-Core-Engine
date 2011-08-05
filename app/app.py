@@ -84,7 +84,7 @@ class ApiHandler(BaseHandler):
         results = RecordIndex.search(args=args, keywords=keywords)
         self.response.headers["Content-Type"] = "application/json"
         self.response.out.write(
-            simplejson.dumps([simplejson.loads(x.record) for x in results]))        
+            simplejson.dumps([simplejson.loads(x.json) for x in results]))        
 
 class LoadTestData(BaseHandler):
     """Loads some test data from a local CSV file."""

@@ -94,7 +94,7 @@ def get_corpus_list():
 def add_dynamic_properties(input_dict, instance, bulkload_state_copy):    
     for key,value in input_dict.iteritems():
         try:
-            instance[key] = value
+            instance[key] = value.lower()
         except:
             pass
     instance.pop('rechash')
