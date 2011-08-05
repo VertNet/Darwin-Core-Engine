@@ -29,6 +29,6 @@ bulkloader-progress*
 
 
 context.txt
-splitcsv.py
+csvsplit.py
 clean_files.sh
 

@@ -57,9 +57,9 @@ def StatusUpdate(msg):
     PrintUpdate(msg)
 
 def _BulkloadOptions(self, parser):
-   parser.add_option('-b', '--config_file', type='string', dest='config_file',
+   parser.add_option('--config_file', type='string', dest='config_file',
                      metavar='FILE', help='Bulkload YAML config file.')
-   parser.add_option('-b', '--filename', type='string', dest='filename',
+   parser.add_option('--filename', type='string', dest='filename',
                      metavar='FILE', help='CSV file with data to bulkload.')                      
    parser.add_option('--url', type='string', dest='url',
                      help='URL endpoint to /remote_api to bulkload to.')                          
