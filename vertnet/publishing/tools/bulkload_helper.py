@@ -21,9 +21,12 @@ import test_util
 test_util.fix_sys_path()
 
 from django.utils import simplejson
+from google.appengine.api import datastore
 from google.appengine.ext.bulkload import transform
+from google.appengine.ext.db import Expando
 from ndb import model
 from ndb import query
+
 
 def create_record_key():
     def wrapper(value, bulkload_state):
@@ -64,14 +67,22 @@ def create_record_index_key():
             ('RecordIndex', 'rname'))(value, bulkload_state)
     return wrapper
 
+def ignore_if_deleted(input_dict, instance, bulkload_state_copy):    
+    if input_dict['recstate'] == 'deleted':
+        return datastore.Entity('Record')
+    return instance
+
 def get_corpus_list():
-    def wrapper(value):
+    def wrapper(value, bulkload_state):
         """Returns list of unique words in the entire record.
         
         Arguments:
             value - the JSON encoded record
         """
+        d = bulkload_state.current_dictionary
         recjson = simplejson.loads(value)
+        d.update(recjson)
+        bulkload_state.current_dictionary = d
         corpus = set([x.strip().lower() for x in recjson.values()]) 
         corpus.update(
             reduce(lambda x,y: x+y, 
@@ -79,6 +90,19 @@ def get_corpus_list():
                        recjson.values()))) # adds tokenized values      
         return list(corpus)
     return wrapper
+
+def add_dynamic_properties(input_dict, instance, bulkload_state_copy):    
+    for key,value in input_dict.iteritems():
+        try:
+            instance[key] = value
+        except:
+            pass
+    instance.pop('rechash')
+    instance.pop('reckey')
+    recstate = instance.pop('recstate')
+    if recstate == 'deleted':
+        return datastore.Entity('RecordIndex')
+    return instance
 
 if __name__ == '__main__':
     class MicroMock(object):

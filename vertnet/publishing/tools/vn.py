@@ -61,8 +61,12 @@ def _BulkloadOptions(self, parser):
                      metavar='FILE', help='Bulkload YAML config file.')
    parser.add_option('-b', '--filename', type='string', dest='filename',
                      metavar='FILE', help='CSV file with data to bulkload.')                      
-   parser.add_option('-b', '--url', type='string', dest='url',
+   parser.add_option('--url', type='string', dest='url',
                      help='URL endpoint to /remote_api to bulkload to.')                          
+   parser.add_option('--num_threads', type='int', dest='num_threads', default=1,
+                     help='Number of threads to transfer records with.')                          
+   parser.add_option('--batch_size', type='int', dest='batch_size', default=10,
+                     help='Number of records to pst in each request.')                          
 
 def _ReportOptions(self, parser):
     pass
@@ -369,21 +373,21 @@ class Bulkload(object):
             
     def execute(self):
         StatusUpdate('Bulkloading')
+
         # Bulkload Record
-        command_line = 'appcfg.py upload_data --config_file=%s --filename=%s --kind Record --url=%s' % \
-            (self.options.config_file, self.options.filename, self.options.url)
-        StatusUpdate(command_line)
-        args = shlex.split(command_line)
-        try:
-            retcode = subprocess.call(args)            
-        except Exception as e:
-            StatusUpdate(str(e))
-        StatusUpdate('retcode=%s' % retcode)
+        cmd = 'appcfg.py upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind Record --url=%s' % \
+            (self.options.batch_size, self.options.num_threads, 
+             self.options.config_file, self.options.filename, self.options.url)
+        StatusUpdate(cmd)
+        args = shlex.split(cmd)
+        subprocess.call(args)            
+
         # Bulkload RecordIndex
-        command_line = 'appcfg.py upload_data --config_file=%s --filename=%s --kind RecordIndex --url=%s' % \
-            (self.options.config_file, self.options.filename, self.options.url)
-        StatusUpdate(command_line)
-        args = shlex.split(command_line)
+        cmd = 'appcfg.py upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind RecordIndex --url=%s' % \
+           (self.options.batch_size, self.options.num_threads, 
+            self.options.config_file, self.options.filename, self.options.url)
+        StatusUpdate(cmd)
+        args = shlex.split(cmd) 
         subprocess.call(args)                        
 
 

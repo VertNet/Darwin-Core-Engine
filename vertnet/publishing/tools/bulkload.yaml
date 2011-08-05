@@ -26,6 +26,8 @@ transformers:
     - property: json
       external_name: recjson
       import_transform: transform.none_if_empty(db.Text)
+
+  post_import_function: bulkload_helper.ignore_if_deleted    
       
 - kind: RecordIndex
   connector: csv
@@ -40,3 +42,5 @@ transformers:
     - property: corpus
       external_name: recjson
       import_transform: bulkload_helper.get_corpus_list()
+
+  post_import_function: bulkload_helper.add_dynamic_properties    
