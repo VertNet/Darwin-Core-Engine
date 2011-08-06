@@ -179,7 +179,7 @@ class RecordIndex(model.Expando): # parent=Record
         return index
 
     @classmethod
-    def search(cls, args={}, keywords=[]):
+    def search(cls, limit, offset, args={}, keywords=[]):
         """Returns all Record entities for the given arguments and keywords.
 
         Arguments
@@ -196,7 +196,7 @@ class RecordIndex(model.Expando): # parent=Record
         for keyword in keywords:
             qry = qry.filter(RecordIndex.corpus == keyword)        
         logging.info('QUERY='+str(qry))
-        return model.get_multi([x.parent() for x in qry.fetch(keys_only=True)])
+        return model.get_multi([x.parent() for x in qry.fetch(limit, offset=offset, keys_only=True)])
 
     @classmethod
     def getcorpus(cls, rec):

@@ -77,65 +77,17 @@ class FileUploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 
 class ApiHandler(BaseHandler):
     def get(self):
+        others = ['offset', 'limit', 'q']
         args = dict(
             (name, self.request.get(name).lower().strip()) \
-                for name in self.request.arguments() if name != 'q')        
-        keywords = [x.lower() for x in self.request.get('q', '').split(',') if x]        
-        results = RecordIndex.search(args=args, keywords=keywords)
+                for name in self.request.arguments() if name not in others)        
+        keywords = [x.lower() for x in self.request.get('q', '').split(',') if x]
+        limit = self.request.get_range('limit', min_value=1, max_value=100, default=10)
+        offset = self.request.get_range('offset', min_value=0, default=0)
+        results = RecordIndex.search(limit, offset, args=args, keywords=keywords)
         self.response.headers["Content-Type"] = "application/json"
         self.response.out.write(
             simplejson.dumps([simplejson.loads(x.json) for x in results]))        
-
-class LoadTestData(BaseHandler):
-    """Loads some test data from a local CSV file."""
-
-    def post(self):
-        self.get()
-        
-    def get(self):
-        pkey = Publisher.create('Museum of Vertebrate Zoology').put()
-        ckey = Collection.create('Birds', pkey).put()
-
-        start = int(self.request.get('start'))
-        size = int(self.request.get('size'))
-        logging.info('start=%s, size=%s' % (start, size))
-        count = -1
-        created = 0
-        path = os.path.join(os.path.dirname(__file__), 'data.csv')
-        reader = csv.DictReader(open(path, 'r'), skipinitialspace=True)
-        dc = []
-        dci = []
-
-        while start >= 0:
-            reader.next()
-            start -= 1
-
-        for rec in reader:
-            if created == size:
-                model.put_multi(dc)
-                model.put_multi(dci)
-            rec = dict((k.lower(), v) for k,v in rec.iteritems()) # lowercase all keys
-            dc.append(Record.create(rec, ckey))
-            dci.append(RecordIndex.create(rec, ckey))
-            created += 1
-        self.response.out.write('Done. Created %s records' % created)
-
-class BulkloadHandler(BaseHandler):
-    @login_required
-    def post(self):
-        batch = simplejson.loads(self.request.get('batch', None))
-        publisher = Publisher.get_by_urlname(urlname(batch.publisher_name))
-        collection = Collection.get_by_urlname(
-            urlname(batch.collection_name, publisher.key))
-        entities = []
-        indexes = []
-        for rec in batch.recs:
-            rec = dict((k.lower(), v) for k,v in rec.iteritems()) # lowercase all keys. do this locally?
-            entities.append(Record.create(rec, collection.key))
-            indexes.append(RecordIndex.create(rec, collection.key))
-        model.put_multi(entities)
-        model.put_multi(indexes)
-        
 
 class PublisherHandler(BaseHandler):
     def get(self):        
@@ -192,18 +144,17 @@ class BulkloadHandler(BaseHandler):
         self.response.out.write(self.request.body)
 
 application = webapp.WSGIApplication(
-         [('/admin/load', LoadTestData),
-          ('/upload', FileUploadHandler),
-          ('/upload-form', UploadForm),
-          ('/api/search', ApiHandler),
-          ('/api/bulkload', BulkloadHandler),
-          ('/publishers/?', PublisherHandler),
-          ('/publishers/([\w-]+)/?', PublisherFeedHandler),
-          ('/publishers/([\w-]+)/([\w-]+)/?', CollectionHandler),
-          ('/publishers/([\w-]+)/([\w-]+)/all', CollectionFeedHandler),
-          ('/publishers/([\w-]+)/([\w-]+)/(.*)', RecordFeedHandler),
-          ],
-         debug=True)
+    [
+        ('/upload', FileUploadHandler),
+        ('/upload-form', UploadForm),
+        ('/api/search', ApiHandler),
+        ('/publishers/?', PublisherHandler),
+        ('/publishers/([\w-]+)/?', PublisherFeedHandler),
+        ('/publishers/([\w-]+)/([\w-]+)/?', CollectionHandler),
+        ('/publishers/([\w-]+)/([\w-]+)/all', CollectionFeedHandler),
+        ('/publishers/([\w-]+)/([\w-]+)/(.*)', RecordFeedHandler),
+        ],
+    debug=True)
          
 def main():
     run_wsgi_app(application)
