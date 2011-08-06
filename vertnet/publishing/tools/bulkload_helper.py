@@ -131,12 +131,7 @@ def get_corpus_list():
         Arguments:
             value - the JSON encoded record
         """
-        # Adds rejson properties to the current dictionary
-        # d = bulkload_state.current_dictionary
         recjson = simplejson.loads(value)
-        # d.update(recjson)
-        # bulkload_state.current_dictionary = d
-        
         corpus = set(
             [x.strip().lower() for key,x in recjson.iteritems() \
                  if key.strip().lower() not in DO_NOT_FULL_TEXT and \
@@ -163,10 +158,6 @@ def add_dynamic_properties(input_dict, instance, bulkload_state_copy):
         except:
             pass
 
-    #instance.pop('rechash')
-    #instance.pop('reckey')
-    #instance.pop('recjson')
-    
     # Do not bulkload CSV records that have recstate equal to 'deleted'
     recstate = input_dict['recstate'] #instance.pop('recstate')
     if recstate == 'deleted':
