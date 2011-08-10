@@ -75,7 +75,7 @@ DO_NOT_INDEX = [
     'identificationid', 'identificationreferences', 'identificationremarks', 
     'individualcount', 'individualid', 'informationwithheld', 'institutionid', 
     'locationid', 'locationremarks', 'modified', 'nameaccordingtoid', 
-    'namepublishedin', 'namepublishedinid', 'occurrencedetails', 'occurrenceid', 
+    'namepublishedin', 'namepublishedinid', 'occurrencedetails', #'occurrenceid', 
     'occurrenceremarks', 'originalnameusageid', 'othercatalognumbers', 
     'parentnameusageid', 'pointradiusspatialfit', 'preparations', 
     'previousidentifications', 'rights', 'rightsholder', 'scientificnameid', 
@@ -94,7 +94,7 @@ def create_record_key():
         d = bulkload_state.current_dictionary
         d['pname'] = flat[1]
         d['cname'] = flat[3]
-        d['rname'] = flat[5]
+        d['rname'] = flat[5].lower()
         return transform.create_deep_key(
             ('Publisher', 'pname'),
             ('Collection', 'cname'),
@@ -113,7 +113,7 @@ def create_record_index_key():
         d = bulkload_state.current_dictionary
         d['pname'] = flat[1]
         d['cname'] = flat[3]
-        d['rname'] = flat[5]
+        d['rname'] = flat[5].lower()
         return transform.create_deep_key(
             ('Publisher', 'pname'),
             ('Collection', 'cname'),

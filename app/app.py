@@ -20,6 +20,7 @@ import csv
 import logging
 import os
 import simplejson
+import urllib
 
 # Google App Engine imports
 from google.appengine.ext import deferred
@@ -34,6 +35,9 @@ from google.appengine.ext.webapp.util import login_required
 from google.appengine.datastore import datastore_rpc
 from google.appengine.datastore import entity_pb
 
+# VertNet imports
+import common
+
 # Datastore Plus imports
 from ndb import query
 
@@ -44,8 +48,7 @@ try:
 except:
     pass
 
-
-# ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------#
 # Handlers
 
 class BaseHandler(webapp.RequestHandler):
@@ -78,14 +81,32 @@ class FileUploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 class ApiHandler(BaseHandler):
     def get(self):
         others = ['offset', 'limit', 'q']
-        args = dict(
-            (name, self.request.get(name).lower().strip()) \
-                for name in self.request.arguments() if name not in others)        
+        args = dict()
+
+        # Get aliases for request param names
+        aliases = []
+        for arg in self.request.arguments():
+            alias = common.DWC_TO_ALIAS.get(arg, None)
+            if alias:
+                args[alias] = urllib.unquote(self.request.get(arg)).lower().strip()
+            else:
+                name = common.ALIAS_TO_DWC.get(arg, None)
+                if name:
+                    args[arg] = urllib.unquote(self.request.get(arg)).lower().strip()
+        
+        logging.info(args)
+
+        # Build dictionary of alias:value mappings
+        #args = dict((str(alias), self.request.get(alias).lower().strip()) \
+        #            for alias in aliases if alias not in others)
+        
+        #logging.info(args)
+
         keywords = [x.lower() for x in self.request.get('q', '').split(',') if x]
         limit = self.request.get_range('limit', min_value=1, max_value=100, default=10)
         offset = self.request.get_range('offset', min_value=0, default=0)
         results = RecordIndex.search(limit, offset, args=args, keywords=keywords)
-        logging.info(str(results))
+        #logging.info(str(results))
         self.response.headers["Content-Type"] = "application/json"
         self.response.out.write(
             simplejson.dumps([simplejson.loads(x.json) for x in results]))        

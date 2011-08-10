@@ -190,8 +190,9 @@ class RecordIndex(model.Expando): # parent=Record
         if len(args) > 0:
             gql = 'SELECT * FROM RecordIndex WHERE'
             for k,v in args.iteritems():
-                gql = "%s %s='%s' AND " % (gql, k, v)
+                gql = "%s %s = '%s' AND " % (gql, k, v)
             gql = gql[:-5] # Removes trailing AND
+            logging.info(gql)
             qry = query.parse_gql(gql)[0]
         for keyword in keywords:
             qry = qry.filter(RecordIndex.corpus == keyword)        
