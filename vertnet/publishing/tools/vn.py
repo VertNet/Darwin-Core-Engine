@@ -49,6 +49,9 @@ from google.appengine.api import users
 from ndb import model
 from ndb import query
 
+# CouchDB
+import couchdb
+
 def PrintUpdate(msg):
     if verbosity > 0:
         print >>sys.stderr, msg
@@ -388,7 +391,40 @@ class Bulkload(object):
             self.options.config_file, self.options.filename, self.options.url)
         StatusUpdate(cmd)
         args = shlex.split(cmd) 
-        subprocess.call(args)                        
+        subprocess.call(args)            
+
+        # Bulkload coordinates to CouchDB
+        couch = couchdb.Server('http://eighty.iriscouch.com')['vertnet']
+        for batch in self.csv_batch(1000):
+            logging.info('Batch=%s' % str(batch))
+            couch.update(batch)
+        
+    def csv_batch(self, batch_size):
+        rows = []
+        count = 0
+        StatusUpdate('batch_size=%s' % batch_size)
+        for row in csv.DictReader(open(self.options.filename, 'r')):            
+            if count > batch_size:
+                StatusUpdate('yield!')
+                yield rows
+                rows = []
+                count = 0
+            count += 1
+            rec = simplejson.loads(row['recjson'])
+            logging.info(rec)
+            try:
+                lat = rec['decimallatitude']
+                lng = rec['decimallongitude']
+                logging.info('lat=%s lng=%s' % (lat, lng))
+                rows.append(dict(
+                        _id=row['reckey'],
+                        loc=[float(lng), float(lat)]))
+            except:
+                StatusUpdate('fail')
+                pass
+        if len(row) > 0:
+            logging.info('returning rows')
+            yield rows
 
 
 class Action(object):
