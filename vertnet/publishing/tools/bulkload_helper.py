@@ -26,6 +26,8 @@ from google.appengine.ext.bulkload import transform
 from google.appengine.ext.db import Expando
 from ndb import model
 from ndb import query
+import common
+import logging
 
 STOP_WORDS = [
     'a', 'able', 'about', 'across', 'after', 'all', 'almost', 'also', 'am', 
@@ -147,14 +149,23 @@ def get_corpus_list():
 
 def add_dynamic_properties(input_dict, instance, bulkload_state_copy):    
     """Adds dynamic properties from the CSV input_dict to the entity instance."""
-    # Adds rejson properties to the current dictionary
-
     recjson = simplejson.loads(input_dict['recjson'])    
     for key,value in recjson.iteritems():
-        if key in DO_NOT_INDEX:
+        if key in DO_NOT_INDEX or value.strip() == '':
+            continue
+        key_name = None
+
+        # Set Darwin Core dynamic property name to the alias
+        if key in common.DWC_TO_ALIAS.keys():
+            key_name = common.DWC_TO_ALIAS[key]
+        else:
+            if key in common.ALIAS_TO_DWC.keys():
+                key_name = key
+        if key_name is None:
+            #logging.info('Skipping unknown column %s=%s' % (key, value))
             continue
         try:
-            instance[key] = value.lower()
+            instance[key_name] = value.lower()
         except:
             pass
 

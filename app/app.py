@@ -85,6 +85,7 @@ class ApiHandler(BaseHandler):
         limit = self.request.get_range('limit', min_value=1, max_value=100, default=10)
         offset = self.request.get_range('offset', min_value=0, default=0)
         results = RecordIndex.search(limit, offset, args=args, keywords=keywords)
+        logging.info(str(results))
         self.response.headers["Content-Type"] = "application/json"
         self.response.out.write(
             simplejson.dumps([simplejson.loads(x.json) for x in results]))        
