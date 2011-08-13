@@ -48,6 +48,7 @@ from google.appengine.api import users
 # DatastorePlus
 from ndb import model
 from ndb import query
+from ndb import key
 
 # CouchDB
 import couchdb
@@ -106,7 +107,7 @@ class DeltaProcessor(object):
             for row in rows:
                 count += 1
                 try:
-                    reckey = model.Key('Record', row['occurrenceid'], parent=ckey).urlsafe()
+                    reckey = model.Key('Record', row['occurrenceid'].lower(), parent=ckey).urlsafe()
                     cols = row.keys()
                     cols.sort()
                     fields = [row[x].strip() for x in cols]
@@ -163,10 +164,6 @@ class DeltaProcessor(object):
             self.totalcount = 0
             reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
-            self.pkey_urlsafe = Publisher.key_by_name(
-                options.publisher_name).urlsafe()
-            self.ckey_urlsafe = Collection.key_by_name(
-                options.collection_name, options.publisher_name).urlsafe()
 
         def _insertchunk(self, cursor, recs):
             cursor.executemany(self.insertsql, recs)
@@ -376,7 +373,7 @@ class Bulkload(object):
             
     def execute(self):
         StatusUpdate('Bulkloading')
-
+        
         # Bulkload Record
         cmd = 'appcfg.py upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind Record --url=%s' % \
             (self.options.batch_size, self.options.num_threads, 
@@ -393,13 +390,27 @@ class Bulkload(object):
         args = shlex.split(cmd) 
         subprocess.call(args)            
 
+        if self.options.url.rfind('localhost') != -1:
+            StatusUpdate('Bulkloading to localhost')
+            appid = 'dev~vert-net'
+            db = 'vertnet-dev'
+        else:
+            StatusUpdate('Bulkloading to production')
+            appid = 'vert-net'
+            db = 'vertnet-prod'
+
         # Bulkload coordinates to CouchDB
-        couch = couchdb.Server('http://eighty.iriscouch.com')['vertnet']
-        for batch in self.csv_batch(1000):
-            logging.info('Batch=%s' % str(batch))
+        server = couchdb.Server('http://eighty.iriscouch.com')
+        try:
+            couch = server[db]
+        except couchdb.http.ResourceNotFound as e:
+            server.create(db)
+            couch = server[db]
+            # TODO create places view
+        for batch in self.csv_batch(1000, appid):
             couch.update(batch)
         
-    def csv_batch(self, batch_size):
+    def csv_batch(self, batch_size, appid):
         rows = []
         count = 0
         StatusUpdate('batch_size=%s' % batch_size)
@@ -415,14 +426,16 @@ class Bulkload(object):
             try:
                 lat = rec['decimallatitude']
                 lng = rec['decimallongitude']
-                logging.info('lat=%s lng=%s' % (lat, lng))
+                reckey = model.Key(urlsafe=row['reckey'])
+                reckey = model.Key(flat=reckey.flat(), app=appid)
+                logging.info('reckey=%s, lat=%s, lng=%s' % (reckey, lat, lng))
                 rows.append(dict(
-                        _id=row['reckey'],
+                        _id=reckey.urlsafe(),
                         loc=[float(lng), float(lat)]))
             except:
                 StatusUpdate('fail')
                 pass
-        if len(row) > 0:
+        if len(rows) > 0:
             logging.info('returning rows')
             yield rows
 

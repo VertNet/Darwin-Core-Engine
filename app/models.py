@@ -58,7 +58,7 @@ class BaseModel(model.Model):
 class Publisher(BaseModel): # key_name=urlname
     """Model for a VertNet data Publisher."""
     name = model.StringProperty('n', required=True)
-    urlname = model.ComputedProperty(lambda self: urlname(self.name))
+    urlname = model.ComputedProperty(lambda self: Publisher.get_urlname(self.name))
     admins = model.UserProperty('a', repeated=True)
     created = model.DateTimeProperty('c', auto_now_add=True)
     updated = model.DateTimeProperty('u', auto_now=True)
@@ -68,7 +68,7 @@ class Publisher(BaseModel): # key_name=urlname
     def create(cls, name, user, appver, appid):
         """Creates a new Publisher instance."""
         return Publisher(
-            id=urlname(name),
+            id=Collection.get_urlname(name),
             name=name,
             json=simplejson.dumps(dict(
                     url='http://%s.%s.appspot.com/publishers/%s' % \
@@ -93,7 +93,7 @@ class Publisher(BaseModel): # key_name=urlname
 class Collection(BaseModel): # key_name=urlname, parent=Publisher
     """Model for a collection of records."""
     name = model.StringProperty('n', required=True)
-    urlname = model.ComputedProperty(lambda self: urlname(self.name))
+    urlname = model.ComputedProperty(lambda self: Collection.get_urlname(self.name))
     admins = model.UserProperty('a', repeated=True)
     created = model.DateTimeProperty('c', auto_now_add=True)
     updated = model.DateTimeProperty('u', auto_now=True)

@@ -31,6 +31,7 @@ from google.appengine.ext.webapp import template
 from google.appengine.ext.webapp.util import run_wsgi_app
 from google.appengine.api import users
 from google.appengine.api import taskqueue
+from google.appengine.api import urlfetch
 from google.appengine.ext.webapp.util import login_required
 from google.appengine.datastore import datastore_rpc
 from google.appengine.datastore import entity_pb
@@ -39,7 +40,7 @@ from google.appengine.datastore import entity_pb
 import common
 
 # Datastore Plus imports
-from ndb import query
+from ndb import query, model
 
 from models import Publisher, Collection, Record, RecordIndex
 try:
@@ -47,6 +48,16 @@ try:
     appver = os.environ['CURRENT_VERSION_ID'].split('.')[0]
 except:
     pass
+
+if 'SERVER_SOFTWARE' in os.environ:
+    PROD = not os.environ['SERVER_SOFTWARE'].startswith('Development')
+else:
+    PROD = True
+
+if PROD:
+    COUCHDB = 'vertnet-prod'
+else:
+    COUCHDB = 'vertnet-dev'
 
 # ------------------------------------------------------------------------------#
 # Handlers
@@ -78,9 +89,33 @@ class FileUploadHandler(blobstore_handlers.BlobstoreUploadHandler):
             return
         self.redirect("/")
 
+class CouchDb(object):
+    @classmethod
+    def query_bb(cls, bb): # TODO add paging support
+        url='http://eighty.iriscouch.com/%s/_design/main/_spatial/points?bbox=%s' % (COUCHDB, bb)
+        logging.info(url)
+        response = urlfetch.fetch(
+            url=url,
+            method=urlfetch.GET)
+        if response.status_code != 200:
+            logging.info('NO RESULTS')
+            return []
+        keys = [model.Key(urlsafe=row['id']) for row in simplejson.loads(response.content).get('rows')]
+        return model.get_multi(keys)
+
 class ApiHandler(BaseHandler):
     def get(self):
-        others = ['offset', 'limit', 'q']
+        others = ['offset', 'limit', 'q', 'bb']
+
+        bb = self.request.get('bb', None)
+        if bb:
+            results = CouchDb.query_bb(bb)
+            logging.info(str(results))
+            self.response.headers["Content-Type"] = "application/json"
+            self.response.out.write(
+                simplejson.dumps([simplejson.loads(x.json) for x in results]))        
+            return
+
         args = dict()
 
         # Get aliases for request param names
@@ -157,16 +192,15 @@ class RecordFeedHandler(BaseHandler):
                 (publisher_name, collection_name, occurrence_id))
 
 class BulkloadHandler(BaseHandler):
-    def post(self):
-        user = users.get_current_user()
-        if not user:
-            self.error(401)
-            return
-        #logging.info(self.request.body)
-        self.response.out.write(self.request.body)
+    def get(self):
+        pkey = model.Key('Publisher', 'MVZ')
+        Publisher(id='MVZ', name='MVZ', json='{}').put()
+        ckey = model.Key('Collection', 'Birds', parent=pkey)            
+        Collection(id='Birds', name='Birds', json='{}').put()
 
 application = webapp.WSGIApplication(
-    [
+    [   
+        ('/pop', BulkloadHandler),
         ('/upload', FileUploadHandler),
         ('/upload-form', UploadForm),
         ('/api/search', ApiHandler),

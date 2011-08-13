@@ -29,6 +29,7 @@ from ndb import query
 import common
 import logging
 
+
 STOP_WORDS = [
     'a', 'able', 'about', 'across', 'after', 'all', 'almost', 'also', 'am', 
     'among', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'because', 'been', 
