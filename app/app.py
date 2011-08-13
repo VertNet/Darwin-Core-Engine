@@ -43,17 +43,21 @@ import common
 from ndb import query, model
 
 from models import Publisher, Collection, Record, RecordIndex
+
+# Set current appid and version
 try:
     appid = os.environ['APPLICATION_ID']
     appver = os.environ['CURRENT_VERSION_ID'].split('.')[0]
 except:
     pass
 
+# Set wether we are in production or development
 if 'SERVER_SOFTWARE' in os.environ:
     PROD = not os.environ['SERVER_SOFTWARE'].startswith('Development')
 else:
     PROD = True
 
+# Set couchdb instance
 if PROD:
     COUCHDB = 'vertnet-prod'
 else:
@@ -91,7 +95,7 @@ class FileUploadHandler(blobstore_handlers.BlobstoreUploadHandler):
 
 class CouchDb(object):
     @classmethod
-    def query_bb(cls, bb): # TODO add paging support
+    def query_bb(cls, bb): # TODO add paging support or count constraints
         url='http://eighty.iriscouch.com/%s/_design/main/_spatial/points?bbox=%s' % (COUCHDB, bb)
         logging.info(url)
         response = urlfetch.fetch(
@@ -107,18 +111,17 @@ class ApiHandler(BaseHandler):
     def get(self):
         others = ['offset', 'limit', 'q', 'bb']
 
+        # Handle bbox request and return
         bb = self.request.get('bb', None)
         if bb:
             results = CouchDb.query_bb(bb)
-            logging.info(str(results))
             self.response.headers["Content-Type"] = "application/json"
             self.response.out.write(
                 simplejson.dumps([simplejson.loads(x.json) for x in results]))        
             return
 
+        # Get Darwin Core args by alias or full name
         args = dict()
-
-        # Get aliases for request param names
         aliases = []
         for arg in self.request.arguments():
             alias = common.DWC_TO_ALIAS.get(arg, None)
@@ -127,21 +130,16 @@ class ApiHandler(BaseHandler):
             else:
                 name = common.ALIAS_TO_DWC.get(arg, None)
                 if name:
-                    args[arg] = urllib.unquote(self.request.get(arg)).lower().strip()
-        
-        logging.info(args)
-
-        # Build dictionary of alias:value mappings
-        #args = dict((str(alias), self.request.get(alias).lower().strip()) \
-        #            for alias in aliases if alias not in others)
-        
-        #logging.info(args)
-
+                    args[arg] = urllib.unquote(self.request.get(arg)).lower().strip()        
+                    
+        # Get other args
         keywords = [x.lower() for x in self.request.get('q', '').split(',') if x]
         limit = self.request.get_range('limit', min_value=1, max_value=100, default=10)
         offset = self.request.get_range('offset', min_value=0, default=0)
+
+        # Execute search
         results = RecordIndex.search(limit, offset, args=args, keywords=keywords)
-        #logging.info(str(results))
+
         self.response.headers["Content-Type"] = "application/json"
         self.response.out.write(
             simplejson.dumps([simplejson.loads(x.json) for x in results]))        

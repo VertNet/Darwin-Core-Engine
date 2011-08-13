@@ -390,6 +390,7 @@ class Bulkload(object):
         args = shlex.split(cmd) 
         subprocess.call(args)            
 
+        # Set appid and couchdb based dev_server or production
         if self.options.url.rfind('localhost') != -1:
             StatusUpdate('Bulkloading to localhost')
             appid = 'dev~vert-net'
@@ -426,6 +427,7 @@ class Bulkload(object):
             try:
                 lat = rec['decimallatitude']
                 lng = rec['decimallongitude']
+                # Set appid of key
                 reckey = model.Key(urlsafe=row['reckey'])
                 reckey = model.Key(flat=reckey.flat(), app=appid)
                 logging.info('reckey=%s, lat=%s, lng=%s' % (reckey, lat, lng))
