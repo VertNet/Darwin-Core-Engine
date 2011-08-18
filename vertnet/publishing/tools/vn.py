@@ -67,9 +67,9 @@ def _BulkloadOptions(self, parser):
                      metavar='FILE', help='CSV file with data to bulkload.')                      
    parser.add_option('--url', type='string', dest='url',
                      help='URL endpoint to /remote_api to bulkload to.')                          
-   parser.add_option('--num_threads', type='int', dest='num_threads', default=1,
+   parser.add_option('--num_threads', type='int', dest='num_threads', default=5,
                      help='Number of threads to transfer records with.')                          
-   parser.add_option('--batch_size', type='int', dest='batch_size', default=10,
+   parser.add_option('--batch_size', type='int', dest='batch_size', default=1,
                      help='Number of records to pst in each request.')                          
 
 def _ReportOptions(self, parser):
@@ -325,10 +325,12 @@ class DeltaProcessor(object):
             StatusUpdate('Creating report')
             cursor = self.conn.cursor()            
             for row in cursor.execute('select reckey, rechash, recjson, recstate from cache'):
+                recjson = simplejson.loads(row[2])
+                json = simplejson.dumps(dict((k, v) for k,v in recjson.iteritems() if v))
                 self.writer.writerow(dict(
                         reckey=row[0],
                         rechash=row[1],
-                        recjson=row[2],
+                        recjson=json,
                         recstate=row[3]))
             StatusUpdate('Report saved to report.csv')
 
