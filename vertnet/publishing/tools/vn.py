@@ -432,7 +432,6 @@ class Bulkload(object):
                 # Set appid of key
                 reckey = model.Key(urlsafe=row['reckey'])
                 reckey = model.Key(flat=reckey.flat(), app=appid)
-                logging.info('reckey=%s, lat=%s, lng=%s' % (reckey, lat, lng))
                 rows.append(dict(
                         _id=reckey.urlsafe(),
                         loc=[float(lng), float(lat)]))

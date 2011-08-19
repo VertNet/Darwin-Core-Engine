@@ -131,7 +131,15 @@ class ApiHandler(BaseHandler):
                 name = common.ALIAS_TO_DWC.get(arg, None)
                 if name:
                     args[arg] = urllib.unquote(self.request.get(arg)).lower().strip()        
-                    
+        
+        # Handle invalid request
+        if len(args) == 0 and not self.request.get('q', None):
+            self.error(404)            
+            args = '<code>' + ','.join(self.request.arguments()) + '</code>'
+            reason = 'Invalid parameter name(s): %s' % args
+            self.render_template('404.html', dict(request_path=self.request.query_string, reason=reason))
+            return
+
         # Get other args
         keywords = [x.lower() for x in self.request.get('q', '').split(',') if x]
         limit = self.request.get_range('limit', min_value=1, max_value=100, default=10)
