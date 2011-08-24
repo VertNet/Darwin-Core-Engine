@@ -319,7 +319,7 @@ class DeltaProcessor(object):
             self.options = options
             columns = ['recstate', 'reckey', 'rechash', 'recjson']
             self.writer = csv.DictWriter(open('report.csv', 'w'), columns, quoting=csv.QUOTE_MINIMAL)
-            self.writer.writeheader()
+            self.writer.writer.writerow(columns)
         
         def execute(self):
             StatusUpdate('Creating report')
