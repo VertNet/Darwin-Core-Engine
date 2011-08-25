@@ -29,7 +29,7 @@ if version_tuple < (2, 4):
   sys.exit(1)
 
 DIR_PATH = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
-SCRIPT_DIR = os.path.join(DIR_PATH, 'vertnet', 'publishing', 'tools')
+SCRIPT_DIR = os.path.join(DIR_PATH, 'darwin_core_engine', 'publishing', 'tools')
 
 EXTRA_PATHS = [
   DIR_PATH,
