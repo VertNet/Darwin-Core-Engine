@@ -15,9 +15,6 @@
 # limitations under the License.
 #
 
-"""This module runs VertNet actions and is based on the Google App Engine
-appcfg.py design."""
-
 # Hack for testing
 global verbosity
 verbosity = 1
@@ -71,6 +68,9 @@ def _BulkloadOptions(self, parser):
                      help='Number of threads to transfer records with.')                          
    parser.add_option('--batch_size', type='int', dest='batch_size', default=1,
                      help='Number of records to pst in each request.')                          
+   parser.add_option('-l', '--localhost', dest='localhost', action='store_true', 
+                      help='Shortcut for bulkloading to http://localhost:8080/_ah/remote_api')                          
+
 
 def _ReportOptions(self, parser):
     pass
@@ -82,9 +82,11 @@ def _DeltasOptions(self, parser):
     parser.add_option('-f', '--csv_file', type='string', dest='csv_file',
                       metavar='FILE', help='Input CSV file.')
     parser.add_option('-p', '--publisher_name', type='string', dest='publisher_name',
-                      metavar='NAME', help='VertNet publisher name.')
+                      metavar='PUBLISHER', help='VertNet publisher name.')
     parser.add_option('-c', '--collection_name', type='string', dest='collection_name',
-                      metavar='NAME', help='VertNet publisher collection name.')
+                      metavar='COLLECTION', help='VertNet publisher collection name.')
+    parser.add_option('-s', '--source_id', type='string', dest='source_id',
+                      metavar='SOURCEID', help='Column name that contains the source record id.')
 
 class DeltaProcessor(object):
 
@@ -104,10 +106,11 @@ class DeltaProcessor(object):
             count = 0
             pkey = model.Key('Publisher', self.options.publisher_name)
             ckey = model.Key('Collection', self.options.collection_name, parent=pkey)            
+            source_id = self.options.source_id
             for row in rows:
                 count += 1
                 try:
-                    reckey = model.Key('Record', row['occurrenceid'].lower(), parent=ckey).urlsafe()
+                    reckey = model.Key('Record', row[source_id].lower(), parent=ckey).urlsafe()
                     cols = row.keys()
                     cols.sort()
                     fields = [row[x].strip() for x in cols]
@@ -133,8 +136,9 @@ class DeltaProcessor(object):
             chunkcount = 0
             cursor = self.conn.cursor()
             reader = csv.DictReader(open(csvfile, 'r'), skipinitialspace=True)
-            if 'occurrenceid' not in [x.lower() for x in reader.fieldnames]:
-                logging.critical('occurrenceid required in csv file')
+            source_id = self.options.source_id
+            if source_id not in [x.lower() for x in reader.fieldnames]:
+                logging.critical('The source_id %s is required in csv file' % source_id)
                 sys.exit(1)
             for row in reader:
                 if count >= batchsize:
@@ -375,6 +379,9 @@ class Bulkload(object):
             
     def execute(self):
         StatusUpdate('Bulkloading')
+
+        if self.options.localhost:
+            self.options.url = 'http://localhost:8080/_ah/remote_api'
         
         # Bulkload Record
         cmd = 'appcfg.py upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind Record --url=%s' % \
@@ -634,6 +641,8 @@ def main(argv):
     except KeyboardInterrupt:
         #StatusUpdate('Interrupted.')
         sys.exit(1)
+    except Exception as e:
+        logging.info(e)
 
 if __name__ == '__main__':
     main(sys.argv)
