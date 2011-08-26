@@ -21,6 +21,8 @@ verbosity = 1
 
 # Standard Python modules
 import copy
+import codecs
+import cStringIO
 import csv
 import hashlib
 import logging
@@ -49,6 +51,38 @@ from ndb import key
 
 # CouchDB
 import couchdb
+
+class UTF8Recoder:
+    """
+    Iterator that reads an encoded stream and reencodes the input to UTF-8
+    """
+    def __init__(self, f, encoding):
+        self.reader = codecs.getreader(encoding)(f)
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        return self.reader.next().encode("utf-8")
+
+class UnicodeReader:
+    """
+    A CSV reader which will iterate over lines in the CSV file "f",
+    which is encoded in the given encoding.
+    """
+
+    def __init__(self, f, dialect=csv.excel, encoding="utf-8", **kwds):
+        f = UTF8Recoder(f, encoding)
+        self.reader = csv.reader(f, dialect=dialect, **kwds)
+        self.fieldnames = self.reader.next()
+
+    def next(self):
+        row = self.reader.next()
+        vals = [unicode(s, "utf-8") for s in row]
+        return dict((self.fieldnames[x], vals[x]) for x in range(len(self.fieldnames)))
+
+    def __iter__(self):
+        return self
 
 def PrintUpdate(msg):
     if verbosity > 0:
@@ -135,7 +169,7 @@ class DeltaProcessor(object):
             self.totalcount = 0
             chunkcount = 0
             cursor = self.conn.cursor()
-            reader = csv.DictReader(open(csvfile, 'r'), skipinitialspace=True)
+            reader = UnicodeReader(open(csvfile, 'r'), skipinitialspace=True)
             source_id = self.options.source_id
             if source_id not in [x.lower() for x in reader.fieldnames]:
                 logging.critical('The source_id %s is required in csv file' % source_id)
@@ -166,7 +200,7 @@ class DeltaProcessor(object):
             self.deltasql = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is null"
             self.deltasql_deleted = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is not null and cache.recstate = 'deleted'"
             self.totalcount = 0
-            reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
+            reader = UnicodeReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
 
         def _insertchunk(self, cursor, recs):
@@ -234,7 +268,7 @@ class DeltaProcessor(object):
             self.options = options
             self.updatesql = 'update cache set rechash=?, recjson=? , recstate=? where reckey=?'
             self.deltasql = 'SELECT c.reckey, t.rechash, t.recjson FROM tmp as t, cache as c WHERE t.reckey = c.reckey AND t.rechash <> c.rechash'        
-            reader = csv.DictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
+            reader = UnicodeReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
 
         def _updatechunk(self, cursor, recs):
@@ -424,7 +458,7 @@ class Bulkload(object):
         rows = []
         count = 0
         StatusUpdate('batch_size=%s' % batch_size)
-        for row in csv.DictReader(open(self.options.filename, 'r')):            
+        for row in UnicodeReader(open(self.options.filename, 'r')):            
             if count > batch_size:
                 StatusUpdate('yield!')
                 yield rows
