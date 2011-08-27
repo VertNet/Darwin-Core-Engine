@@ -52,6 +52,26 @@ from ndb import key
 # CouchDB
 import couchdb
 
+
+def unicode_csv_dict_reader(unicode_csv_data, dialect=csv.excel, **kwargs):
+    # csv.py doesn't do Unicode; encode temporarily as UTF-8:
+    csv_reader = csv.reader(utf_8_encoder(unicode_csv_data),
+                            dialect=dialect, **kwargs)
+    header = csv_reader.next()
+    for row in csv_reader:
+        if len(row) == 0:
+            continue
+        vals = [unicode(s, "utf-8") for s in row]        
+        d = dict((header[x], vals[x]) for x in range(len(header)))
+        logging.info(d)
+        yield d
+
+def utf_8_encoder(unicode_csv_data):
+    for line in unicode_csv_data:
+        yield line #line.encode('utf-8')
+
+
+
 class UTF8Recoder:
     """
     Iterator that reads an encoded stream and reencodes the input to UTF-8
@@ -65,16 +85,21 @@ class UTF8Recoder:
     def next(self):
         return self.reader.next().encode("utf-8")
 
+
+
 class UnicodeDictReader:
     """
     A CSV reader which will iterate over lines in the CSV file "f",
     which is encoded in the given encoding.
     """
 
-    def __init__(self, f, dialect=csv.excel, encoding="utf-8", **kwds):
-        f = UTF8Recoder(f, encoding)
-        self.reader = csv.reader(f, dialect=dialect, **kwds)
+    def __init__(self, f, dialect=csv.excel, **kwds): #encoding="utf-8", **kwds):
+        #f = UTF8Recoder(f, encoding)
+        data = f.read().split('\n')
+        self.reader = csv.reader(utf_8_encoder(data), dialect=dialect, **kwds)
+        logging.info('hi')
         self.fieldnames = self.reader.next()
+        logging.info(fieldnames)
 
     def next(self):
         row = self.reader.next()
@@ -123,6 +148,9 @@ def PrintUpdate(msg):
 
 def StatusUpdate(msg):
     PrintUpdate(msg)
+
+def ErrorUpdate(msg):
+    PrintUpdate('ERROR: %s' % msg)
 
 def _BulkloadOptions(self, parser):
    parser.add_option('--config_file', type='string', dest='config_file',
@@ -181,17 +209,20 @@ class DeltaProcessor(object):
                     cols = row.keys()
                     cols.sort()
                     fields = [row[x].strip() for x in cols]
-                    line = reduce(lambda x,y: '%s%s' % (x, y), fields)
-                    rechash = hashlib.sha224(line).hexdigest()
+                    line = reduce(lambda x,y: '%s%s' % (unicode(x), unicode(y)), fields)
+                    rechash = hashlib.sha224(line.encode('utf-8')).hexdigest()
                     recjson = simplejson.dumps(row)
                     yield (reckey, rechash, recjson)
                 except Exception as (strerror):
                     ErrorUpdate('Unable to process row %s - %s' % (count, strerror))
 
         def _insertchunk(self, rows, cursor):
-            cursor.executemany(self.insertsql, self._rowgenerator(rows))
-            self.conn.commit()
-            StatusUpdate('%s...' % self.totalcount)
+            try:
+                cursor.executemany(self.insertsql, self._rowgenerator(rows))
+                self.conn.commit()
+                StatusUpdate('%s...' % self.totalcount)
+            except Exception as e:
+                logging.error(e)
 
         def insert(self):
             csvfile = self.options.csv_file
@@ -202,12 +233,16 @@ class DeltaProcessor(object):
             self.totalcount = 0
             chunkcount = 0
             cursor = self.conn.cursor()
-            reader = UnicodeDictReader(open(csvfile, 'r'), skipinitialspace=True)
+            fieldnames = open(csvfile, 'r').readline().strip().split(',') #codecs.open(csvfile, encoding='utf-8', mode='r')
+            f = open(csvfile, 'r')
+            #logging.info(f.read())
+            #reader = UnicodeDictReader(f, skipinitialspace=True)
+            reader = unicode_csv_dict_reader(f)
             source_id = self.options.source_id
-            if source_id not in [x.lower() for x in reader.fieldnames]:
+            if source_id not in [x.lower() for x in fieldnames]:
                 logging.critical('The source_id %s is required in csv file' % source_id)
                 sys.exit(1)
-            for row in reader:  
+            for row in reader:
                 if count >= batchsize:
                     self.totalcount += count
                     self._insertchunk(rows, cursor)
@@ -217,7 +252,6 @@ class DeltaProcessor(object):
                 row = dict((k.lower(), v) for k,v in row.iteritems()) # lowercase all keys
                 rows.append(row)
                 count += 1
-
             if count > 0:
                 self.totalcount += count
                 self._insertchunk(rows, cursor)
@@ -233,7 +267,8 @@ class DeltaProcessor(object):
             self.deltasql = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is null"
             self.deltasql_deleted = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is not null and cache.recstate = 'deleted'"
             self.totalcount = 0
-            reader = UnicodeDictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
+            f = codecs.open(self.options.csv_file, encoding='utf-8', mode='r')
+            reader = UnicodeDictReader(f, skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
 
         def _insertchunk(self, cursor, recs):
@@ -301,7 +336,8 @@ class DeltaProcessor(object):
             self.options = options
             self.updatesql = 'update cache set rechash=?, recjson=? , recstate=? where reckey=?'
             self.deltasql = 'SELECT c.reckey, t.rechash, t.recjson FROM tmp as t, cache as c WHERE t.reckey = c.reckey AND t.rechash <> c.rechash'        
-            reader = UnicodeDictReader(open(self.options.csv_file, 'r'), skipinitialspace=True)
+            f = codecs.open(self.options.csv_file, encoding='utf-8', mode='r')
+            reader = UnicodeDictReader(f, skipinitialspace=True)
             columns = [x.lower() for x in reader.next().keys()]            
 
         def _updatechunk(self, cursor, recs):
@@ -492,7 +528,8 @@ class Bulkload(object):
         rows = []
         count = 0
         StatusUpdate('batch_size=%s' % batch_size)
-        for row in UnicodeDictReader(open(self.options.filename, 'r')):            
+        f = codecs.open(self.options.filename, encoding='utf-8', mode='r')
+        for row in UnicodeDictReader(f):            
             if count > batch_size:
                 StatusUpdate('yield!')
                 yield rows
