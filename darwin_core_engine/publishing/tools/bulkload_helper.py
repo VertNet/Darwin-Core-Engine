@@ -150,7 +150,7 @@ def get_corpus_list():
 
 def add_dynamic_properties(input_dict, instance, bulkload_state_copy):    
     """Adds dynamic properties from the CSV input_dict to the entity instance."""
-    recjson = simplejson.loads(input_dict['recjson'])    
+    recjson = simplejson.loads(input_dict['recjson'].encode('utf-8'))
     for key,value in recjson.iteritems():
         if key in DO_NOT_INDEX or value.strip() == '':
             continue

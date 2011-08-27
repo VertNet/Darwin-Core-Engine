@@ -52,26 +52,6 @@ from ndb import key
 # CouchDB
 import couchdb
 
-
-def unicode_csv_dict_reader(unicode_csv_data, dialect=csv.excel, **kwargs):
-    # csv.py doesn't do Unicode; encode temporarily as UTF-8:
-    csv_reader = csv.reader(utf_8_encoder(unicode_csv_data),
-                            dialect=dialect, **kwargs)
-    header = csv_reader.next()
-    for row in csv_reader:
-        if len(row) == 0:
-            continue
-        vals = [unicode(s, "utf-8") for s in row]        
-        d = dict((header[x], vals[x]) for x in range(len(header)))
-        logging.info(d)
-        yield d
-
-def utf_8_encoder(unicode_csv_data):
-    for line in unicode_csv_data:
-        yield line #line.encode('utf-8')
-
-
-
 class UTF8Recoder:
     """
     Iterator that reads an encoded stream and reencodes the input to UTF-8
@@ -85,21 +65,16 @@ class UTF8Recoder:
     def next(self):
         return self.reader.next().encode("utf-8")
 
-
-
 class UnicodeDictReader:
     """
     A CSV reader which will iterate over lines in the CSV file "f",
     which is encoded in the given encoding.
     """
 
-    def __init__(self, f, dialect=csv.excel, **kwds): #encoding="utf-8", **kwds):
-        #f = UTF8Recoder(f, encoding)
-        data = f.read().split('\n')
-        self.reader = csv.reader(utf_8_encoder(data), dialect=dialect, **kwds)
-        logging.info('hi')
+    def __init__(self, f, dialect=csv.excel, encoding="utf-8", **kwds):
+        f = UTF8Recoder(f, encoding)
+        self.reader = csv.reader(f, dialect=dialect, **kwds)
         self.fieldnames = self.reader.next()
-        logging.info(fieldnames)
 
     def next(self):
         row = self.reader.next()
@@ -233,13 +208,10 @@ class DeltaProcessor(object):
             self.totalcount = 0
             chunkcount = 0
             cursor = self.conn.cursor()
-            fieldnames = open(csvfile, 'r').readline().strip().split(',') #codecs.open(csvfile, encoding='utf-8', mode='r')
             f = open(csvfile, 'r')
-            #logging.info(f.read())
-            #reader = UnicodeDictReader(f, skipinitialspace=True)
-            reader = unicode_csv_dict_reader(f)
+            reader = UnicodeDictReader(f, skipinitialspace=True)
             source_id = self.options.source_id
-            if source_id not in [x.lower() for x in fieldnames]:
+            if source_id not in [x.lower() for x in reader.fieldnames]:
                 logging.critical('The source_id %s is required in csv file' % source_id)
                 sys.exit(1)
             for row in reader:
@@ -438,7 +410,7 @@ class DeltaProcessor(object):
                 self.writer.writerow(dict(
                         reckey=row[0],
                         rechash=row[1],
-                        recjson=json,
+                        recjson=json.encode('utf-8'),
                         recstate=row[3]))
             StatusUpdate('Report saved to report.csv')
 
