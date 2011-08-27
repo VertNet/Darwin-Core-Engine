@@ -5,7 +5,7 @@
 
 # Logs and databases #
 ######################
-*.csv
+#*.csv
 *.log
 *.sql
 *.sqlite3.db
