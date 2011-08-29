@@ -617,8 +617,8 @@ and deleted records."""))
     def Run(self):
         try:
             self.action(self)
-        except:
-            return 1
+        except Exception as e:
+            raise e
         return 0
 
     def Help(self, action=None):
@@ -680,32 +680,22 @@ and deleted records."""))
 
         class Formatter(optparse.IndentedHelpFormatter):
             """Custom help formatter that does not reformat the description."""
-
             def format_description(self, description):
                 """Very simple formatter."""
                 return description + '\n'
-
         desc = self._GetActionDescriptions()
         desc = ('Action must be one of:\n%s'
                 'Use \'help <action>\' for a detailed description.') % desc
-
         parser = self.parser_class(usage='%prog [options] <action>',
                                    description=desc,
                                    formatter=Formatter(),
                                    conflict_handler='resolve')
-
         parser.add_option('-h', '--help', action='store_true',
                           dest='help', help='Show the help message and exit.')
-
         parser.add_option('-v', '--verbose', action='store_const', const=2,
                           dest='verbose', default=1,
                           help='Print info level logs.')
-
-
         return parser
-
-
-
 
 def main(argv):
     logging.basicConfig(format=('%(asctime)s %(levelname)s %(filename)s:'
@@ -715,7 +705,7 @@ def main(argv):
         if result:
             sys.exit(result)
     except KeyboardInterrupt:
-        #StatusUpdate('Interrupted.')
+        StatusUpdate('Interrupted.')
         sys.exit(1)
     except Exception as e:
         logging.info(e)
