@@ -16,7 +16,9 @@
 #
 
 # Standard Python imports
+import codecs
 import csv
+import cStringIO
 import logging
 import os
 import simplejson

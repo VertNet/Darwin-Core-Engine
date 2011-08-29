@@ -611,7 +611,6 @@ and deleted records."""))
         elif self.options.verbose == 3:
             logging.getLogger().setLevel(logging.DEBUG)
 
-        global verbosity
         verbosity = self.options.verbose
 
 
