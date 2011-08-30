@@ -19,103 +19,26 @@
 global verbosity
 verbosity = 1
 
+# VertNet modules
+from utils import *
+from deltas import DeltaProcessor
+from bulkload import Bulkload
+
 # Standard Python modules
 import copy
 import codecs
-import cStringIO
-import csv
-import hashlib
 import logging
 import optparse
 import os
 import re
 import shlex
 import simplejson
-import sqlite3
 import subprocess
 import sys
-import time
 import urllib
-from uuid import uuid4
-
-# VertNet app
-from app import Publisher, Collection, Record
-
-# Google App Engine
-from google.appengine.api import users
 
 # DatastorePlus
 from ndb import model
-from ndb import query
-from ndb import key
-
-# CouchDB
-import couchdb
-
-class UTF8Recoder:
-    """
-    Iterator that reads an encoded stream and reencodes the input to UTF-8
-    """
-    def __init__(self, f, encoding):
-        self.reader = codecs.getreader(encoding)(f)
-
-    def __iter__(self):
-        return self
-
-    def next(self):
-        return self.reader.next().encode("utf-8")
-
-class UnicodeDictReader:
-    """
-    A CSV reader which will iterate over lines in the CSV file "f",
-    which is encoded in the given encoding.
-    """
-
-    def __init__(self, f, dialect=csv.excel, encoding="utf-8", **kwds):
-        f = UTF8Recoder(f, encoding)
-        self.reader = csv.reader(f, dialect=dialect, **kwds)
-        self.fieldnames = self.reader.next()
-
-    def next(self):
-        row = self.reader.next()
-        vals = [unicode(s, "utf-8") for s in row]
-        return dict((self.fieldnames[x], vals[x]) for x in range(len(self.fieldnames)))
-
-    def __iter__(self):
-        return self
-
-class UnicodeDictWriter:
-    """
-    A CSV writer which will write rows to CSV file "f",
-    which is encoded in the given encoding.
-    """
-
-    def __init__(self, f, fieldnames, dialect=csv.excel, encoding="utf-8", **kwds):
-        # Redirect output to a queue
-        self.fieldnames = [x.encode("utf-8") for x in fieldnames]
-        self.queue = cStringIO.StringIO()
-        self.writer = csv.writer(self.queue, dialect=dialect, **kwds)
-        self.stream = f
-        self.encoder = codecs.getincrementalencoder(encoding)()
-        
-    def writeheader(self):
-        self.writer.writerow(self.fieldnames)
-
-    def writerow(self, row):
-        self.writer.writerow([row[x].encode("utf-8") for x in self.fieldnames])
-        # Fetch UTF-8 output from the queue ...
-        data = self.queue.getvalue()
-        data = data.decode("utf-8")
-        # ... and reencode it into the target encoding
-        data = self.encoder.encode(data)
-        # write to the target stream
-        self.stream.write(data)
-        # empty queue
-        self.queue.truncate(0)
-
-    def writerows(self, rows):
-        for row in rows:
-            self.writerow(row)
 
 def PrintUpdate(msg):
     if verbosity > 0:
@@ -141,7 +64,6 @@ def _BulkloadOptions(self, parser):
    parser.add_option('-l', '--localhost', dest='localhost', action='store_true', 
                       help='Shortcut for bulkloading to http://localhost:8080/_ah/remote_api')                          
 
-
 def _ReportOptions(self, parser):
     pass
 
@@ -157,375 +79,6 @@ def _DeltasOptions(self, parser):
                       metavar='COLLECTION', help='VertNet publisher collection name.')
     parser.add_option('-s', '--source_id', type='string', dest='source_id',
                       metavar='SOURCEID', help='Column name that contains the source record id.')
-
-class DeltaProcessor(object):
-
-    DB_FILE = 'bulk.sqlite3.db'
-    CACHE_TABLE = 'cache'
-    TMP_TABLE = 'tmp'
-
-    class TmpTable(object):
-
-        def __init__(self, conn, options, table):
-            self.conn = conn
-            self.options = options
-            self.table = table
-            self.insertsql = 'insert into tmp values (?, ?, ?)'
-        
-        def _rowgenerator(self, rows):
-            count = 0
-            pkey = model.Key('Publisher', self.options.publisher_name)
-            ckey = model.Key('Collection', self.options.collection_name, parent=pkey)            
-            source_id = self.options.source_id
-            for row in rows:
-                count += 1
-                try:
-                    reckey = model.Key('Record', row[source_id].lower(), parent=ckey).urlsafe()
-                    cols = row.keys()
-                    cols.sort()
-                    fields = [row[x].strip() for x in cols]
-                    line = reduce(lambda x,y: '%s%s' % (unicode(x), unicode(y)), fields)
-                    rechash = hashlib.sha224(line.encode('utf-8')).hexdigest()
-                    recjson = simplejson.dumps(row)
-                    yield (reckey, rechash, recjson)
-                except Exception as (strerror):
-                    ErrorUpdate('Unable to process row %s - %s' % (count, strerror))
-
-        def _insertchunk(self, rows, cursor):
-            try:
-                cursor.executemany(self.insertsql, self._rowgenerator(rows))
-                self.conn.commit()
-                StatusUpdate('%s...' % self.totalcount)
-            except Exception as e:
-                logging.error(e)
-
-        def insert(self):
-            csvfile = self.options.csv_file
-            StatusUpdate('Processing incoming records')
-            batchsize = int(self.options.batch_size)
-            rows = []
-            count = 0
-            self.totalcount = 0
-            chunkcount = 0
-            cursor = self.conn.cursor()
-            f = open(csvfile, 'r')
-            reader = UnicodeDictReader(f, skipinitialspace=True)
-            source_id = self.options.source_id
-            if source_id not in [x.lower() for x in reader.fieldnames]:
-                logging.critical('The source_id %s is required in csv file' % source_id)
-                sys.exit(1)
-            for row in reader:
-                if count >= batchsize:
-                    self.totalcount += count
-                    self._insertchunk(rows, cursor)
-                    count = 0
-                    rows = []
-                    chunkcount += 1
-                row = dict((k.lower(), v) for k,v in row.iteritems()) # lowercase all keys
-                rows.append(row)
-                count += 1
-            if count > 0:
-                self.totalcount += count
-                self._insertchunk(rows, cursor)
-
-            StatusUpdate('Processed %s records' % self.totalcount)
-
-    class NewRecords(object):
-
-        def __init__(self, conn, options):
-            self.conn = conn
-            self.options = options
-            self.insertsql = 'insert into cache values (?, ?, ?, ?)' 
-            self.deltasql = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is null"
-            self.deltasql_deleted = "SELECT * FROM tmp LEFT OUTER JOIN cache USING (reckey) WHERE cache.reckey is not null and cache.recstate = 'deleted'"
-            self.totalcount = 0
-            f = codecs.open(self.options.csv_file, encoding='utf-8', mode='r')
-            reader = UnicodeDictReader(f, skipinitialspace=True)
-            columns = [x.lower() for x in reader.next().keys()]            
-
-        def _insertchunk(self, cursor, recs):
-            cursor.executemany(self.insertsql, recs)
-            self.conn.commit()
-            StatusUpdate('%s...' % self.totalcount)
-
-        def _insertchunk_update(self, cursor, recs):
-            cursor.executemany('update cache set rechash=?, recjson=? , recstate=? where reckey=?', recs)
-            self.conn.commit()
-            StatusUpdate('%s...' % self.totalcount)
-
-        def execute(self):
-            StatusUpdate("Checking for new records")
-            batchsize = int(self.options.batch_size)
-            cursor = self.conn.cursor()
-            newrecs = cursor.execute(self.deltasql)
-            recs = []
-            count = 0
-            self.totalcount = 0
-
-            for row in newrecs.fetchall():
-                if count >= batchsize:
-                    self.totalcount += count
-                    self._insertchunk(cursor, recs)
-                    count = 0
-                    recs = []
-                count += 1
-                reckey = row[0]
-                rechash = row[1]
-                recjson = row[2]
-                recs.append((reckey, rechash, recjson, 'new'))
-            if count > 0:
-                self.totalcount += count
-                self._insertchunk(cursor, recs)
-
-            count = 0
-
-            # Handles deleted records in cache table:
-            newrecs = cursor.execute(self.deltasql_deleted)
-            for row in newrecs.fetchall():
-                if count >= batchsize:
-                    self.totalcount += count
-                    self._insertchunk_update(cursor, recs)
-                    count = 0
-                    recs = []
-                count += 1
-                reckey = row[0]
-                rechash = row[1]
-                recjson = row[2]
-                recs.append((rechash, recjson, 'new', reckey))            
-            if count > 0:
-                self.totalcount += count
-                self._insertchunk_update(cursor, recs)
-
-            self.conn.commit()
-            if self.totalcount > 0:
-                StatusUpdate('%s new records found' % self.totalcount)
-            else:
-                StatusUpdate('No new records found')
-    
-    class UpdatedRecords(object):
-        def __init__(self, conn, options):
-            self.conn = conn
-            self.options = options
-            self.updatesql = 'update cache set rechash=?, recjson=? , recstate=? where reckey=?'
-            self.deltasql = 'SELECT c.reckey, t.rechash, t.recjson FROM tmp as t, cache as c WHERE t.reckey = c.reckey AND t.rechash <> c.rechash'        
-            f = codecs.open(self.options.csv_file, encoding='utf-8', mode='r')
-            reader = UnicodeDictReader(f, skipinitialspace=True)
-            columns = [x.lower() for x in reader.next().keys()]            
-
-        def _updatechunk(self, cursor, recs):
-            """Bulk inserts docs to couchdb and updates cache table doc revision."""
-            cursor.executemany(self.updatesql, recs)
-            self.conn.commit()
-            StatusUpdate('%s...' % self.totalcount)
-
-        def execute(self):
-            StatusUpdate("Checking for updated records")
-            batchsize = int(self.options.batch_size)
-            cursor = self.conn.cursor()
-            updatedrecs = cursor.execute(self.deltasql)
-            recs = []
-            count = 0
-            self.totalcount = 0
-
-            for row in updatedrecs.fetchall():
-                if count >= batchsize:
-                    self._updatechunk(cursor, recs, entities)
-                    self.totalcount += count
-                    count = 0
-                    recs = []
-                count += 1
-                reckey = row[0]
-                rechash = row[1] # Note: This is the new hash from tmp table.
-                recjson = row[2]
-                recs.append((rechash, recjson, 'updated', reckey))
-
-            if count > 0:
-                self.totalcount += count
-                self._updatechunk(cursor, recs)
-
-            self.conn.commit()
-            if self.totalcount > 0:
-                StatusUpdate('%s updated records found' % self.totalcount)
-            else:
-                StatusUpdate('No updated records found')
-
-    class DeletedRecords(object):
-        def __init__(self, conn, options):
-            self.conn = conn
-            self.options = options
-            self.deletesql = 'delete from cache where reckey=?'
-            self.updatesql = 'update cache set recstate=? where reckey=?'
-            self.deltasql = 'SELECT * FROM cache LEFT OUTER JOIN tmp USING (reckey) WHERE tmp.reckey is null'
-
-        def _deletechunk(self, cursor, recs):
-            cursor.executemany(self.updatesql, recs)
-            self.conn.commit()
-            StatusUpdate('%s...' % self.totalcount)
-
-        def execute(self):
-            StatusUpdate("Checking for deleted records")
-            batchsize = int(self.options.batch_size)
-            cursor = self.conn.cursor()
-            deletes = cursor.execute(self.deltasql)
-            count = 0
-            self.totalcount = 0
-            recs = []
-
-            for row in deletes.fetchall():
-                if count >= batchsize:
-                    self._deletechunk(cursor, recs)
-                    self.totalcount += count
-                    count = 0
-                    recs = []
-                count += 1
-                reckey = row[0]
-                recs.append(('deleted', reckey))
-
-            if count > 0:
-                self.totalcount += count
-                self._deletechunk(cursor, recs)
-
-            self.conn.commit()
-            if self.totalcount > 0:
-                StatusUpdate('%s deleted records found' % self.totalcount)
-            else:
-                StatusUpdate('No deleted records found')
-
-
-    class Report(object):
-        def __init__(self, conn, options):
-            self.conn = conn
-            self.options = options
-            columns = ['recstate', 'reckey', 'rechash', 'recjson']
-            f = codecs.open('report.csv', encoding='utf-8', mode='w')
-            self.writer = UnicodeDictWriter(f, columns, quoting=csv.QUOTE_MINIMAL)
-            self.writer.writeheader()
-        
-        def execute(self):
-            StatusUpdate('Creating report')
-            cursor = self.conn.cursor()            
-            for row in cursor.execute('select reckey, rechash, recjson, recstate from cache'):
-                recjson = simplejson.loads(row[2])
-                json = simplejson.dumps(dict((k, v) for k,v in recjson.iteritems() if v))
-                self.writer.writerow(dict(
-                        reckey=row[0],
-                        rechash=row[1],
-                        recjson=json.encode('utf-8'),
-                        recstate=row[3]))
-            StatusUpdate('Report saved to report.csv')
-
-    @classmethod
-    def setupdb(cls):
-        conn = sqlite3.connect(cls.DB_FILE, check_same_thread=False)
-        c = conn.cursor()
-        # Creates the cache table:
-        c.execute('create table if not exists ' + cls.CACHE_TABLE +
-                  '(reckey text, ' +
-                  'rechash text, ' +
-                  'recjson text, ' +
-                  'recstate text)')
-        # Creates the temporary table:
-        c.execute('create table if not exists ' + cls.TMP_TABLE +
-                  '(reckey text, ' +
-                  'rechash text, ' +
-                  'recjson text)')
-        # Clears all records from the temporary table:
-        c.execute('delete from %s' % cls.TMP_TABLE)
-        c.close()
-        return conn
-
-    def __init__(self, options):
-        self.options = options
-        self.conn = DeltaProcessor.setupdb()
-
-    def deltas(self):
-        """Calculates deltas and stores in sqlite."""
-        self.TmpTable(self.conn, self.options, DeltaProcessor.TMP_TABLE).insert()
-        self.NewRecords(self.conn, self.options).execute()
-        self.UpdatedRecords(self.conn, self.options).execute()
-        self.DeletedRecords(self.conn, self.options).execute()
-
-    def report(self):
-        self.Report(self.conn, self.options).execute()
-
-class Bulkload(object):
-    def __init__(self, options):
-        StatusUpdate('Boom!')
-        self.options = options
-            
-    def execute(self):
-        StatusUpdate('Bulkloading')
-
-        if self.options.localhost:
-            self.options.url = 'http://localhost:8080/_ah/remote_api'
-        
-        # Bulkload Record
-        cmd = 'appcfg.py upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind Record --url=%s' % \
-            (self.options.batch_size, self.options.num_threads, 
-             self.options.config_file, self.options.filename, self.options.url)
-        StatusUpdate(cmd)
-        args = shlex.split(cmd)
-        subprocess.call(args)            
-
-        # Bulkload RecordIndex
-        cmd = 'appcfg.py upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind RecordIndex --url=%s' % \
-           (self.options.batch_size, self.options.num_threads, 
-            self.options.config_file, self.options.filename, self.options.url)
-        StatusUpdate(cmd)
-        args = shlex.split(cmd) 
-        subprocess.call(args)            
-
-        # Set appid and couchdb based dev_server or production
-        if self.options.url.rfind('localhost') != -1:
-            StatusUpdate('Bulkloading to localhost')
-            appid = 'dev~vert-net'
-            db = 'vertnet-dev'
-        else:
-            StatusUpdate('Bulkloading to production')
-            appid = 'vert-net'
-            db = 'vertnet-prod'
-
-        # Bulkload coordinates to CouchDB
-        server = couchdb.Server('http://eighty.iriscouch.com')
-        try:
-            couch = server[db]
-        except couchdb.http.ResourceNotFound as e:
-            server.create(db)
-            couch = server[db]
-            # TODO create places view
-        for batch in self.csv_batch(1000, appid):
-            couch.update(batch)
-        
-    def csv_batch(self, batch_size, appid):
-        rows = []
-        count = 0
-        StatusUpdate('batch_size=%s' % batch_size)
-        f = codecs.open(self.options.filename, encoding='utf-8', mode='r')
-        for row in UnicodeDictReader(f):            
-            if count > batch_size:
-                StatusUpdate('yield!')
-                yield rows
-                rows = []
-                count = 0
-            count += 1
-            rec = simplejson.loads(row['recjson'])
-            logging.info(rec)
-            try:
-                lat = rec['decimallatitude']
-                lng = rec['decimallongitude']
-                # Set appid of key
-                reckey = model.Key(urlsafe=row['reckey'])
-                reckey = model.Key(flat=reckey.flat(), app=appid)
-                rows.append(dict(
-                        _id=reckey.urlsafe(),
-                        loc=[float(lng), float(lat)]))
-            except:
-                StatusUpdate('fail')
-                pass
-        if len(rows) > 0:
-            logging.info('returning rows')
-            yield rows
-
 
 class Action(object):
     """Contains information about a command line action."""
@@ -548,7 +101,6 @@ class Action(object):
         return method()
 
 class Vn(object):
-
     actions = dict(
         help=Action(
             function='Help',
@@ -582,37 +134,25 @@ and deleted records."""))
     def __init__(self, argv, parser_class=optparse.OptionParser):
         self.parser_class = parser_class
         self.argv = argv
-
         self.parser = self._GetOptionParser()
         for action in self.actions.itervalues():
             action.options(self, self.parser)
-
         self.options, self.args = self.parser.parse_args(argv[1:])
-
         if len(self.args) < 1:
             self._PrintHelpAndExit()
-
         action = self.args.pop(0)
-
         if action not in self.actions:
             self.parser.error("Unknown action: '%s'\n%s" %
                               (action, self.parser.get_description()))
-
         self.action = self.actions[action]
-
-
         self.parser, self.options = self._MakeSpecificParser(self.action)
-
         if self.options.help:
             self._PrintHelpAndExit()
-
         if self.options.verbose == 2:
             logging.getLogger().setLevel(logging.INFO)
         elif self.options.verbose == 3:
             logging.getLogger().setLevel(logging.DEBUG)
-
         verbosity = self.options.verbose
-
 
     def Run(self):
         try:
@@ -626,7 +166,6 @@ and deleted records."""))
         if not action:
             if len(self.args) > 1:
                 self.args = [' '.join(self.args)]
-
         if len(self.args) != 1 or self.args[0] not in self.actions:
             self.parser.error('Expected a single action argument. '
                               ' Must be one of:\n' +
@@ -638,11 +177,13 @@ and deleted records."""))
 
     def Bulkload(self):
         StatusUpdate('Starting bulkload')
-        Bulkload(self.options).execute()        
+        Bulkload(self.options).execute() 
+        StatusUpdate('Bulkloading complete')       
 
     def Report(self):
         StatusUpdate('Creating a report')
         DeltaProcessor(self.options).report()
+        StatusUpdate('Report created')
 
     def Deltas(self):
         csv_file = self.options.csv_file
@@ -651,6 +192,7 @@ and deleted records."""))
             sys.exit(1)
         StatusUpdate('Calculating deltas for %s' % csv_file)
         DeltaProcessor(self.options).deltas()
+        StatusUpdate('Delta calculation complete')
 
     def _PrintHelpAndExit(self, exit_code=2):
         """Prints the parser's help message and exits the program."""
