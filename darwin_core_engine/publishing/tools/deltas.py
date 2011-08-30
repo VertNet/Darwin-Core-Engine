@@ -85,7 +85,8 @@ class DeltaProcessor(object):
             self.totalcount = 0
             chunkcount = 0
             cursor = self.conn.cursor()
-            f = open(csvfile, 'r')
+            #f = open(csvfile, 'r')
+            f = codecs.open(csv_file, encoding='utf-8', mode='r')
             reader = UnicodeDictReader(f, skipinitialspace=True)
             source_id = self.options.source_id
             if source_id not in [x.lower() for x in reader.fieldnames]:

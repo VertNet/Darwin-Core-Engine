@@ -28,8 +28,11 @@ import codecs
 import csv
 import logging
 import shlex
+import sqlite3
 import subprocess
 import simplejson
+import sys
+import tempfile
 
 # Datastore Plus modules
 from ndb import model
@@ -39,7 +42,6 @@ import couchdb
 
 class Bulkload(object):
     def __init__(self, options):
-        logging.info('Boom!')
         self.options = options
             
     def execute(self):
@@ -49,20 +51,46 @@ class Bulkload(object):
             self.options.url = 'http://localhost:8080/_ah/remote_api'
         
         # Bulkload Record
-        cmd = 'appcfg.py upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind Record --url=%s' % \
-            (self.options.batch_size, self.options.num_threads, 
+        log_file = tempfile.NamedTemporaryFile(delete=False)  
+        cmd = 'appcfg.py upload_data --log_file=%s --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind Record --url=%s' % \
+            (log_file.name, self.options.batch_size, self.options.num_threads, 
              self.options.config_file, self.options.filename, self.options.url)
         logging.info(cmd)
         args = shlex.split(cmd)
-        subprocess.call(args)            
+        subprocess.call(args, bufsize=-1)
+
+        # Get progress sqlite3 database name
+        log_file.flush()
+        log_file.seek(0)
+        rec_db_filename = None
+        for line in log_file.readlines():
+            if line.rfind('Opening database:') != -1:
+                rec_db_filename = line.split(':')[3].strip()
+        log_file.seek(0)
 
         # Bulkload RecordIndex
-        cmd = 'appcfg.py upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind RecordIndex --url=%s' % \
-           (self.options.batch_size, self.options.num_threads, 
+        cmd = 'appcfg.py --log_file=%s upload_data --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind RecordIndex --url=%s' % \
+           (log_file.name, self.options.batch_size, self.options.num_threads, 
             self.options.config_file, self.options.filename, self.options.url)
         logging.info(cmd)
         args = shlex.split(cmd) 
-        subprocess.call(args)            
+        subprocess.call(args) 
+        
+        # Get progress sqlite3 database name
+        log_file.flush()
+        log_file.seek(0)
+        recindex_db_filename = None
+        for line in log_file.readlines():
+            if line.rfind('Opening database:') != -1:
+                recindex_db_filename = line.split(':')[3].strip()
+
+        # Update cache.recstate to published or error
+        conn = sqlite3.connect('bulk.sqlite3.db', check_same_thread=False)
+        cur = conn.cursor()
+        values = self._reckeys_not_bulkloaded(rec_db_filename, recindex_db_filename)
+        sql = 'update cache set recstate=? where reckey=?'
+        recs = cur.executemany(sql, values)
+        conn.commit()
 
         # Set appid and couchdb based dev_server or production
         if self.options.url.rfind('localhost') != -1:
@@ -114,3 +142,31 @@ class Bulkload(object):
             logging.info('returning rows')
             yield rows
 
+    
+    def _reckeys_not_bulkloaded(self, rec_db_filename, recindex_db_filename):
+        """Generator for (reckey, state) where state is published or error."""
+        # Get rows in Record progress database
+        rec_conn = sqlite3.connect(rec_db_filename, check_same_thread=False)
+        rec_cur = rec_conn.cursor()
+        recs = rec_cur.execute('select state from progress')
+
+        # Get rows in RecordIndex progress database
+        index_conn = sqlite3.connect(recindex_db_filename, check_same_thread=False)
+        index_cur = index_conn.cursor()
+        indexes = index_cur.execute('select state from progress')
+        
+        # Get reader for report.csv
+        f = codecs.open(self.options.filename, encoding='utf-8', mode='r')
+        report = UnicodeDictReader(f, skipinitialspace=True)
+                
+        # Yield (state, reckey)
+        for row in report:
+            reckey = row['reckey']
+            rec_state = recs.fetchone()[0]
+            index_state = indexes.fetchone()[0]
+            state = 'published'
+            # state == 2 means successful bukload
+            if rec_state != 2 and index_state != 2:
+                state = 'error'
+                logging.warn('Record %s failed to bulkload' % reckey)
+            yield (state, reckey)
