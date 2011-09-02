@@ -149,6 +149,7 @@ class ApiHandler(BaseHandler):
         results = RecordIndex.search(limit, offset, args=args, keywords=keywords)
 
         self.response.headers["Content-Type"] = "application/json"
+        # TODO: optimize by building string instead of inflating json
         self.response.out.write(
             simplejson.dumps([simplejson.loads(x.json) for x in results]))        
 
