@@ -20,6 +20,28 @@ __contributors__ = ["John Wieczorek (gtuco.btuco@gmail.com)"]
 
 """This module contains transformation functions for the bulkloader."""
 
+# Setup sys.path for bulkloading
+import os, sys
+DIR_PATH = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
+DIR_PATH = reduce(lambda x,y: '%s%s%s' % (x,os.path.sep,y), DIR_PATH.split(os.path.sep)[:-2])
+SCRIPT_DIR = os.path.join(DIR_PATH, 'tools', 'publishing')
+EXTRA_PATHS = [
+  DIR_PATH,
+  SCRIPT_DIR,
+  os.path.join(DIR_PATH, 'lib', 'google_appengine'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'antlr3'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'django_0_96'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'fancy_urllib'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'ipaddr'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'protorpc'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'webob'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'yaml', 'lib'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'simplejson'),
+  os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'graphy'),
+  os.path.join(DIR_PATH, 'lib', 'appengine-ndb-experiment'),
+]
+sys.path = EXTRA_PATHS + sys.path
+
 # DCE modules
 from dce import concepts
 
@@ -147,6 +169,11 @@ def get_corpus_list():
                             val.strip().lower() not in STOP_WORDS]))) # adds tokenized values      
         return list(corpus)
     return wrapper
+
+def ignore_if_deleted(input_dict, instance, bulkload_state_copy):    
+    if input_dict['recstate'] == 'deleted':
+        return datastore.Entity('Record')
+    return instance
 
 def add_dynamic_properties(input_dict, instance, bulkload_state_copy):    
     """Adds dynamic properties from the CSV input_dict to the entity instance."""

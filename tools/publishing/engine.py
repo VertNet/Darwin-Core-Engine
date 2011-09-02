@@ -22,10 +22,10 @@ __contributors__ = ["John Wieczorek (gtuco.btuco@gmail.com)"]
 global verbosity
 verbosity = 1
 
-# VertNet modules
-from utils import *
-from deltas import DeltaProcessor
-from bulkload import Bulkload
+# DCE modules
+from dce.utils import *
+from dce.deltas import DeltaProcessor
+from dce.bulkload import Bulkload
 
 # Standard Python modules
 import copy

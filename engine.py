@@ -46,6 +46,7 @@ EXTRA_PATHS = [
   os.path.join(DIR_PATH, 'lib', 'google_appengine', 'lib', 'graphy'),
   os.path.join(DIR_PATH, 'lib', 'appengine-ndb-experiment'),
   os.path.join(DIR_PATH, 'app'),
+  os.path.join(DIR_PATH, 'dce'),
 ]
 
 SCRIPT_EXCEPTIONS = {

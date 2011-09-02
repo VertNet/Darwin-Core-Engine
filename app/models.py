@@ -24,6 +24,7 @@ import os
 import simplejson
 
 # Google App Engine imports
+from google.appengine.datastore.datastore_query import Cursor
 from google.appengine.ext import db
 from google.appengine.ext import deferred
 from google.appengine.ext import webapp
@@ -38,8 +39,7 @@ from google.appengine.datastore import datastore_rpc
 from google.appengine.datastore import entity_pb
 
 # Datastore Plus imports
-from ndb import model
-from ndb import query
+from ndb import model, query, tasklets
 
 try:
     appid = os.environ['APPLICATION_ID']
@@ -145,6 +145,9 @@ class Record(BaseModel): # key_name=record.occurrenceid, parent=Collection
     created = model.DateTimeProperty('c', auto_now_add=True)
     updated = model.DateTimeProperty('u', auto_now=True)
 
+    # Do not cache keys (http://goo.gl/tzgxp)
+    # _use_memcache = False
+
     @classmethod
     def create(cls, config):
         collection_key = config.get('collection_key')
@@ -168,6 +171,9 @@ class RecordIndex(model.Expando): # parent=Record
     """Index relation for Record."""
     corpus = model.StringProperty(repeated=True) # full text
 
+    # Do not cache keys (http://goo.gl/tzgxp)
+    _use_memcache = False
+
     @classmethod
     def create(cls, rec, collection_key):
         """Creates a new RecordIndex instance."""
@@ -181,14 +187,20 @@ class RecordIndex(model.Expando): # parent=Record
         return index
 
     @classmethod
-    def search(cls, limit, offset, args={}, keywords=[]):
-        """Returns all Record entities for the given arguments and keywords.
+    def search(cls, params):
+        """Returns (records, cursor).
 
         Arguments
             args - Dictionary with Darwin Core concept keys
             keywords - list of keywords to search on
         """        
+        ctx = tasklets.get_context()
+        ctx.set_memcache_policy(False)
+
         qry = RecordIndex.query()
+        
+        # Add darwin core name filters
+        args = params['args']
         if len(args) > 0:
             gql = 'SELECT * FROM RecordIndex WHERE'
             for k,v in args.iteritems():
@@ -196,10 +208,28 @@ class RecordIndex(model.Expando): # parent=Record
             gql = gql[:-5] # Removes trailing AND
             logging.info(gql)
             qry = query.parse_gql(gql)[0]
+            
+        # Add full text keyword filters
+        keywords = params['keywords']
         for keyword in keywords:
             qry = qry.filter(RecordIndex.corpus == keyword)        
+
         logging.info('QUERY='+str(qry))
-        return model.get_multi([x.parent() for x in qry.fetch(limit, offset=offset, keys_only=True)])
+
+        # Setup query paging
+        limit = params['limit']
+        cursor = params['cursor']        
+        if cursor:
+            logging.info('Cursor')
+            index_keys, next_cursor, more = qry.fetch_page(limit, start_cursor=cursor, keys_only=True)
+            record_keys = [x.parent() for x in index_keys]
+        else:
+            logging.info('No cursor')
+            index_keys, next_cursor, more = qry.fetch_page(limit, keys_only=True)
+            record_keys = [x.parent() for x in index_keys]
+            
+        # Return results
+        return (model.get_multi(record_keys), next_cursor, more)
 
     @classmethod
     def getcorpus(cls, rec):

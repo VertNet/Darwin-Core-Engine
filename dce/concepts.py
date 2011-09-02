@@ -346,7 +346,7 @@ def get_name(short_name):
     return SHORT_NAMES.get(short_name, None)
 
 def is_name(name):
-    return FULL_NAMES.key_exists(name)
+    return FULL_NAMES.has_key(name)
 
 def is_short_name(short_name):
-    return SHORT_NAME.key_exists(short_name)
+    return SHORT_NAMES.has_key(short_name)

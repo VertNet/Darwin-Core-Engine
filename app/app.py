@@ -26,6 +26,7 @@ import simplejson
 import urllib
 
 # Google App Engine imports
+from google.appengine.datastore.datastore_query import Cursor
 from google.appengine.ext import deferred
 from google.appengine.ext import webapp
 from google.appengine.ext import blobstore
@@ -38,12 +39,13 @@ from google.appengine.api import urlfetch
 from google.appengine.ext.webapp.util import login_required
 from google.appengine.datastore import datastore_rpc
 from google.appengine.datastore import entity_pb
+from google.appengine.api import memcache
 
 # DCE imports
 from dce import concepts
 
 # Datastore Plus imports
-from ndb import query, model
+from ndb import query, model, context, tasklets
 
 from models import Publisher, Collection, Record, RecordIndex
 
@@ -111,9 +113,76 @@ class CouchDb(object):
         return model.get_multi(keys)
 
 class ApiHandler(BaseHandler):
-    def get(self):
-        others = ['offset', 'limit', 'q', 'bb']
+    
+    class DarwinCoreRequest(object):
+        """Class for handling a Darwin Core request."""
+        
+        @classmethod
+        def handle(cls, handler):
+            params = cls.validate_request(handler.request)
+            if not params:
+                cls.error(404)            
+            m_key = str(params)
+            logging.info('key=%s' %  m_key)
+            response = memcache.get(m_key)
+            if response:
+                handler.response.headers["Content-Type"] = "application/json"
+                handler.response.out.write(response)
+                return                
+            results, cursor, more = RecordIndex.search(params)
+            records = '[%s]' % ','.join([x.json for x in results])
+            response = '{"records":%s' % records
+            if cursor and more:
+                offset = cursor.to_websafe_string()
+                response = '%s, "next_offset":"%s"}' % (response, offset)
+            else:
+                response = '%s, "next_offset":null}' % response
+            memcache.add(m_key, response)
+            handler.response.headers["Content-Type"] = "application/json"
+            handler.response.out.write(response)
 
+        @classmethod
+        def validate_request(cls, request):
+            args = cls.get_dwc_args(request)
+            if len(args) == 0 and not request.get('q', None):
+                return False
+            keywords = [x.lower() for x in request.get('q', '').split(',') if x]
+            limit = request.get_range('limit', min_value=1, max_value=100, default=10)
+            offset = request.get('offset', None)
+            cursor = None
+            if offset:
+                cursor = Cursor.from_websafe_string(offset)
+            return dict(
+                args=args, 
+                keywords=keywords, 
+                limit=limit, 
+                offset=offset, 
+                cursor=cursor)
+
+        @classmethod
+        def get_dwc_args(cls, request):
+            """Return dictionary of Darwin Core short names to values."""
+            args = dict()
+            for arg in request.arguments():
+                short_name = None
+                if concepts.is_short_name(arg):
+                    short_name = arg
+                elif concepts.is_name(arg):
+                    short_name = concepts.get_short_name(arg)
+                if short_name:
+                    args[short_name] = request.get(arg).strip().lower()
+            return args
+
+        @classmethod
+        def error(cls, error_code, handler):  
+            logging.info('Bad request')
+            handler.error(error_code)            
+            reason = 'Invalid parameters'
+            handler.render_template(
+                '404.html', 
+                dict(request_path=handler.request.query_string, reason=reason))
+
+    def get(self):
         # Handle bbox request and return
         bb = self.request.get('bb', None)
         if bb:
@@ -122,39 +191,9 @@ class ApiHandler(BaseHandler):
             self.response.out.write(
                 simplejson.dumps([simplejson.loads(x.json) for x in results]))        
             return
-
-        # Get Darwin Core args by alias or full name
-        args = dict()
-        aliases = []
-        for arg in self.request.arguments():
-            alias = common.DWC_TO_ALIAS.get(arg, None)
-            if alias:
-                args[alias] = urllib.unquote(self.request.get(arg)).lower().strip()
-            else:
-                name = common.ALIAS_TO_DWC.get(arg, None)
-                if name:
-                    args[arg] = urllib.unquote(self.request.get(arg)).lower().strip()        
         
-        # Handle invalid request
-        if len(args) == 0 and not self.request.get('q', None):
-            self.error(404)            
-            args = '<code>' + ','.join(self.request.arguments()) + '</code>'
-            reason = 'Invalid parameter name(s): %s' % args
-            self.render_template('404.html', dict(request_path=self.request.query_string, reason=reason))
-            return
+        ApiHandler.DarwinCoreRequest.handle(self)
 
-        # Get other args
-        keywords = [x.lower() for x in self.request.get('q', '').split(',') if x]
-        limit = self.request.get_range('limit', min_value=1, max_value=100, default=10)
-        offset = self.request.get_range('offset', min_value=0, default=0)
-
-        # Execute search
-        results = RecordIndex.search(limit, offset, args=args, keywords=keywords)
-
-        self.response.headers["Content-Type"] = "application/json"
-        # TODO: optimize by building string instead of inflating json
-        self.response.out.write(
-            simplejson.dumps([simplejson.loads(x.json) for x in results]))        
 
 class PublisherHandler(BaseHandler):
     def get(self):        
