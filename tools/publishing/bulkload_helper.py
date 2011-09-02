@@ -1,35 +1,40 @@
 #!/usr/bin/env python
-#
-# Copyright 2011 Aaron Steele
+
+# Copyright 2011 The Regents of the University of California 
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
+
+__author__ = "Aaron Steele (eightysteele@gmail.com)"
+__copyright__ = "Copyright 2011 The Regents of the University of California"
+__contributors__ = ["John Wieczorek (gtuco.btuco@gmail.com)"]
 
 """This module contains transformation functions for the bulkloader."""
 
-import test_util
-test_util.fix_sys_path()
+# DCE modules
+from dce import concepts
 
-from django.utils import simplejson
-from google.appengine.api import datastore
-from google.appengine.ext.bulkload import transform
-from google.appengine.ext.db import Expando
-from ndb import model
-from ndb import query
-import common
+# Standard Python modules
+import simplejson
 import logging
 
+# App Engine modules
+from google.appengine.api import datastore
+from google.appengine.ext.bulkload import transform
 
+# NDB modules
+from ndb import model
+
+# Words not included in full text search
 STOP_WORDS = [
     'a', 'able', 'about', 'across', 'after', 'all', 'almost', 'also', 'am', 
     'among', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'because', 'been', 
@@ -44,7 +49,7 @@ STOP_WORDS = [
     'us', 'wants', 'was', 'we', 'were', 'what', 'when', 'where', 'which', 'while', 
     'who', 'whom', 'why', 'will', 'with', 'would', 'yet', 'you', 'your']
 
-# Darwin Core concept names whose value should not be full text indexed
+# Darwin Core names not indexed in full text
 DO_NOT_FULL_TEXT = [
     'acceptednameusageid', 'accessrights', 'basisofrecord', 'collectionid', 
     'coordinateprecision', 'coordinateuncertaintyinmeters', 'datasetid', 
@@ -63,7 +68,7 @@ DO_NOT_FULL_TEXT = [
     'type', 'verbatimcoordinates', 'verbatimeventdate', 'verbatimlatitude', 
     'verbatimlongitude', 'year']
 
-# Darwin Core concept names that should not be indexed
+# Darwin Core names not indexed
 DO_NOT_INDEX = [
     'acceptednameusageid', 'accessrights', 'associatedmedia', 
     'associatedoccurrences', 'associatedreferences', 
@@ -122,11 +127,6 @@ def create_record_index_key():
             ('RecordIndex', 'rname'))(value, bulkload_state)
     return wrapper
 
-def ignore_if_deleted(input_dict, instance, bulkload_state_copy):    
-    if input_dict['recstate'] == 'deleted':
-        return datastore.Entity('Record')
-    return instance
-
 def get_corpus_list():
     def wrapper(value, bulkload_state):
         """Returns list of unique words in the entire record.
@@ -150,38 +150,21 @@ def get_corpus_list():
 
 def add_dynamic_properties(input_dict, instance, bulkload_state_copy):    
     """Adds dynamic properties from the CSV input_dict to the entity instance."""
-    recjson = simplejson.loads(input_dict['recjson'].encode('utf-8'))
-    for key,value in recjson.iteritems():
-        if key in DO_NOT_INDEX or value.strip() == '':
-            continue
-        key_name = None
 
-        # Set Darwin Core dynamic property name to the alias
-        if key in common.DWC_TO_ALIAS.keys():
-            key_name = common.DWC_TO_ALIAS[key]
-        else:
-            if key in common.ALIAS_TO_DWC.keys():
-                key_name = key
-        if key_name is None:
-            #logging.info('Skipping unknown column %s=%s' % (key, value))
-            continue
-        try:
-            instance[key_name] = value.lower()
-        except:
-            pass
-
-    # Do not bulkload CSV records that have recstate equal to 'deleted'
-    recstate = input_dict['recstate'] #instance.pop('recstate')
-    if recstate == 'deleted':
+    # Ingore deleted records
+    if input_dict['recstate'] == 'deleted':
         return datastore.Entity('RecordIndex')
+    
+    # Populate dynamic properties using Darwin Core short names
+    recjson = simplejson.loads(input_dict['recjson'].encode('utf-8'))
+    for name,value in recjson.iteritems():
+        value = value.strip().lower()
+        if name in DO_NOT_INDEX or value == '':
+            continue
+        if concepts.is_short_name(name):
+            instance[name] = value
+        elif concepts.is_name(name):
+            instance[concepts.get_short_name(name)] = value
 
     return instance
 
-if __name__ == '__main__':
-    class MicroMock(object):
-        def __init__(self, **kwargs):
-            self.__dict__.update(kwargs)
-
-    create_record_key()(
-        'agFfci4LEglQdWJsaXNoZXIiAXAMCxIKQ29sbGVjdGlvbiIBYwwLEgZSZWNvcmQiATEM',
-        MicroMock(current_dictionary=dict(app='test')))

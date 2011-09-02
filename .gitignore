@@ -13,6 +13,8 @@
 bulkloader-log*
 bulkloader-progress*
 
+.svn
+
 # IDE files #
 #############
 *.idea
