@@ -20,8 +20,9 @@ __contributors__ = ["John Wieczorek (gtuco.btuco@gmail.com)"]
 
 """This module provides support for calculating CSV file deltas."""
 
-# VertNet modules
+# DCE modules
 from utils import UnicodeDictReader, UnicodeDictWriter
+import concepts
 
 # Standard Python modules
 import codecs
@@ -34,6 +35,8 @@ import sys
 
 # Datastore Plus
 from ndb import model
+
+BATCH_SIZE = 10 * 1000
 
 class DeltaProcessor(object):
 
@@ -48,7 +51,21 @@ class DeltaProcessor(object):
             self.options = options
             self.table = table
             self.insertsql = 'insert into tmp values (?, ?, ?)'
-        
+                
+        def _get_rec(self, row):
+            rec = {}
+            for name,value in row.iteritems():
+                full_name = concepts.get_full_name(name)
+                if not full_name: # Skip non-dwc names
+                    continue
+                typed_value = concepts.transform(full_name, value)
+                if typed_value: 
+                    value = typed_value
+                else:
+                    pass # TODO: Candidate for validation?
+                rec[full_name] = value
+            return rec
+
         def _rowgenerator(self, rows):
             count = 0
             pkey = model.Key('Publisher', self.options.publisher_name)
@@ -63,7 +80,7 @@ class DeltaProcessor(object):
                     fields = [row[x].strip() for x in cols]
                     line = reduce(lambda x,y: '%s%s' % (unicode(x), unicode(y)), fields)
                     rechash = hashlib.sha224(line.encode('utf-8')).hexdigest()
-                    recjson = simplejson.dumps(row)
+                    recjson = simplejson.dumps(self._get_rec(row))
                     yield (reckey, rechash, recjson)
                 except Exception as (strerror):
                     logging.error('Unable to process row %s - %s' % (count, strerror))
@@ -79,13 +96,12 @@ class DeltaProcessor(object):
         def insert(self):
             csvfile = self.options.csv_file
             logging.info('Processing incoming records')
-            batchsize = int(self.options.batch_size)
+            batchsize = BATCH_SIZE
             rows = []
             count = 0
             self.totalcount = 0
             chunkcount = 0
             cursor = self.conn.cursor()
-            #f = open(csvfile, 'r')
             f = codecs.open(csvfile, encoding='utf-8', mode='r')
             reader = UnicodeDictReader(f, skipinitialspace=True)
             source_id = self.options.source_id
@@ -133,7 +149,7 @@ class DeltaProcessor(object):
 
         def execute(self):
             logging.info("Checking for new records")
-            batchsize = int(self.options.batch_size)
+            batchsize = BATCH_SIZE
             cursor = self.conn.cursor()
             newrecs = cursor.execute(self.deltasql)
             recs = []
@@ -198,7 +214,7 @@ class DeltaProcessor(object):
 
         def execute(self):
             logging.info("Checking for updated records")
-            batchsize = int(self.options.batch_size)
+            batchsize = BATCH_SIZE
             cursor = self.conn.cursor()
             updatedrecs = cursor.execute(self.deltasql)
             recs = []
@@ -242,7 +258,7 @@ class DeltaProcessor(object):
 
         def execute(self):
             logging.info("Checking for deleted records")
-            batchsize = int(self.options.batch_size)
+            batchsize = BATCH_SIZE
             cursor = self.conn.cursor()
             deletes = cursor.execute(self.deltasql)
             count = 0

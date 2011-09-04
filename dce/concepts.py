@@ -18,7 +18,9 @@ __author__ = "Aaron Steele (eightysteele@gmail.com)"
 __copyright__ = "Copyright 2011 The Regents of the University of California"
 __contributors__ = ["John Wieczorek (gtuco.btuco@gmail.com)"]
 
-FULL_NAMES = {
+import logging
+
+FULL_TO_SHORT_NAMES = {
     'acceptednameusage': 'anu',
     'acceptednameusageid': 'anuid',
     'accessrights': 'ar',
@@ -177,7 +179,7 @@ FULL_NAMES = {
     'year': 'y'
 }
 
-SHORT_NAMES = {
+SHORT_TO_FULL_NAMES = {
     'am': 'associatedmedia',
     'anu': 'acceptednameusage',
     'anuid': 'acceptednameusageid',
@@ -333,20 +335,201 @@ SHORT_NAMES = {
     'y': 'year'
 }
 
-def names():
-    return FULL_NAMES.keys()
+NAME_TYPES = {
+    'acceptednameusage': str,
+    'acceptednameusageid': str,
+    'accessrights': str,
+    'associatedmedia': str,
+    'associatedoccurrences': str,
+    'associatedreferences': str,
+    'associatedsequences': str,
+    'associatedtaxa': str,
+    'basisofrecord': str,
+    'bed': str,
+    'behavior': str,
+    'bibliographiccitation': str,
+    'catalognumber': str,
+    'class': str,
+    'collectioncode': str,
+    'collectionid': str,
+    'continent': str,
+    'coordinateprecision': str,
+    'coordinateuncertaintyinmeters': int,
+    'country': str,
+    'countrycode': str,
+    'county': str,
+    'datageneralizations': str,
+    'datasetid': str,
+    'datasetname': str,
+    'dateidentified': str,
+    'day': int,
+    'decimallatitude': float,
+    'decimallongitude': float,
+    'disposition': str,
+    'dynamicproperties': str,
+    'earliestageorloweststage': str,
+    'earliesteonorlowesteonothem': str,
+    'earliestepochorlowestseries': str,
+    'earliesteraorlowesterathem': str,
+    'earliestperiodorlowestsystem': str,
+    'enddayofyear': int,
+    'establishmentmeans': str,
+    'eventdate': str,
+    'eventid': str,
+    'eventremarks': str,
+    'eventtime': str,
+    'family': str,
+    'fieldnotes': str,
+    'fieldnumber': str,
+    'footprintspatialfit': float,
+    'footprintsrs': str,
+    'footprintwkt': str,
+    'formation': str,
+    'genus': str,
+    'geodeticdatum': str,
+    'geologicalcontextid': str,
+    'georeferencedby': str,
+    'georeferenceprotocol': str,
+    'georeferenceremarks': str,
+    'georeferencesources': str,
+    'georeferenceverificationstatus': str,
+    'group': str,
+    'habitat': str,
+    'higherclassification': str,
+    'highergeography': str,
+    'highergeographyid': str,
+    'highestbiostratigraphiczone': str,
+    'identificationid': str,
+    'identificationqualifier': str,
+    'identificationreferences': str,
+    'identificationremarks': str,
+    'identifiedby': str,
+    'individualcount': int,
+    'individualid': str,
+    'informationwithheld': str,
+    'infraspecificepithet': str,
+    'institutioncode': str,
+    'institutionid': str,
+    'island': str,
+    'islandgroup': str,
+    'kingdom': str,
+    'language': str,
+    'latestageorhigheststage': str,
+    'latesteonorhighesteonothem': str,
+    'latestepochorhighestseries': str,
+    'latesteraorhighesterathem': str,
+    'latestperiodorhighestsystem': str,
+    'lifestage': str,
+    'lithostratigraphicterms': str,
+    'locality': str,
+    'locationaccordingto': str,
+    'locationid': str,
+    'locationremarks': str,
+    'lowestbiostratigraphiczone': str,
+    'maximumdepthinmeters': int,
+    'maximumdistanceabovesurfaceinmeters': int,
+    'maximumelevationinmeters': int,
+    'member': str,
+    'minimumdepthinmeters': int,
+    'minimumdistanceabovesurfaceinmeters': int,
+    'minimumelevationinmeters': int,
+    'modified': str,
+    'month': int,
+    'municipality': str,
+    'nameaccordingto': str,
+    'nameaccordingtoid': str,
+    'namepublishedin': str,
+    'namepublishedinid': str,
+    'nomenclaturalcode': str,
+    'nomenclaturalstatus': str,
+    'occurrencedetails': str,
+    'occurrenceid': str,
+    'occurrenceremarks': str,
+    'occurrencestatus': str,
+    'order': str,
+    'originalnameusage': str,
+    'originalnameusageid': str,
+    'othercatalognumbers': str,
+    'ownerinstitutioncode': str,
+    'parentnameusage': str,
+    'parentnameusageid': str,
+    'phylum': str,
+    'pointradiusspatialfit': str,
+    'preparations': str,
+    'previousidentifications': str,
+    'recordedby': str,
+    'recordnumber': str,
+    'reproductivecondition': str,
+    'rights': str,
+    'rightsholder': str,
+    'samplingeffort': str,
+    'samplingprotocol': str,
+    'scientificname': str,
+    'scientificnameauthorship': str,
+    'scientificnameid': str,
+    'sex': str,
+    'specificepithet': str,
+    'startdayofyear': int,
+    'stateprovince': str,
+    'subgenus': str,
+    'taxonconceptid': str,
+    'taxonid': str,
+    'taxonomicstatus': str,
+    'taxonrank': str,
+    'taxonremarks': str,
+    'type': str,
+    'typestatus': str,
+    'verbatimcoordinates': str,
+    'verbatimcoordinatesystem': str,
+    'verbatimdepth': str,
+    'verbatimelevation': str,
+    'verbatimeventdate': str,
+    'verbatimlatitude': str,
+    'verbatimlocality': str,
+    'verbatimlongitude': str,
+    'verbatimsrs': str,
+    'verbatimtaxonrank': str,
+    'vernacularname': str,
+    'waterbody': str,
+    'year': int
+}
 
-def short_names():
-    return SHORT_NAMES.keys()
+def transform(name, value):
+    name = get_full_name(name)
+    if not name:
+        return None
+    t = NAME_TYPES.get(name)
+    if t == str:
+        return value
+    if t == float:
+        try:
+            return float(value)
+        except:
+            pass
+    if t == int:
+        try:
+            return int(float(value))
+        except:
+            pass
+    
+def get_full_name(name):
+    if not name:
+        return None
+    name = name.strip().lower()
+    full_name = None
+    if FULL_TO_SHORT_NAMES.has_key(name):
+        full_name = name
+    if not full_name:
+        full_name = SHORT_TO_FULL_NAMES.get(name)
+    return full_name
 
 def get_short_name(name):
-    return FULL_NAMES.get(name, None)
-
-def get_name(short_name):
-    return SHORT_NAMES.get(short_name, None)
-
-def is_name(name):
-    return FULL_NAMES.has_key(name)
-
-def is_short_name(short_name):
-    return SHORT_NAMES.has_key(short_name)
+    if not name:
+        return None
+    name = name.strip().lower()
+    short_name = None
+    if SHORT_TO_FULL_NAMES.has_key(name):
+        short_name = name
+    if not short_name:
+        short_name = FULL_TO_SHORT_NAMES.get(name)
+    return short_name

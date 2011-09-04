@@ -164,11 +164,7 @@ class ApiHandler(BaseHandler):
             """Return dictionary of Darwin Core short names to values."""
             args = dict()
             for arg in request.arguments():
-                short_name = None
-                if concepts.is_short_name(arg):
-                    short_name = arg
-                elif concepts.is_name(arg):
-                    short_name = concepts.get_short_name(arg)
+                short_name = concepts.get_short_name(arg)
                 if short_name:
                     args[short_name] = request.get(arg).strip().lower()
             return args

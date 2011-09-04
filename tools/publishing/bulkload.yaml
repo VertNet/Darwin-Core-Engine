@@ -22,7 +22,8 @@ transformers:
 
     - property: json
       external_name: recjson
-      import_transform: transform.none_if_empty(db.Text)
+      import_transform: bulkload_helper.get_rec_json()
+      #import_transform: transform.none_if_empty(db.Text)
 
   post_import_function: bulkload_helper.ignore_if_deleted    
       

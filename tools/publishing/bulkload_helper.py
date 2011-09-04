@@ -50,6 +50,7 @@ import simplejson
 import logging
 
 # App Engine modules
+from google.appengine.ext import db
 from google.appengine.api import datastore
 from google.appengine.ext.bulkload import transform
 
@@ -175,6 +176,18 @@ def ignore_if_deleted(input_dict, instance, bulkload_state_copy):
         return datastore.Entity('Record')
     return instance
 
+def get_rec_json():
+    """Returns a JSON object where all keys have values."""
+    def wrapper(recjson, bulkload_state):    
+        recjson = simplejson.loads(recjson)
+        rec = {}
+        for name,value in recjson.iteritems():
+            if not value:
+                continue
+            rec[name] = value
+        return db.Text(simplejson.dumps(rec))
+    return wrapper
+
 def add_dynamic_properties(input_dict, instance, bulkload_state_copy):    
     """Adds dynamic properties from the CSV input_dict to the entity instance."""
 
@@ -185,13 +198,11 @@ def add_dynamic_properties(input_dict, instance, bulkload_state_copy):
     # Populate dynamic properties using Darwin Core short names
     recjson = simplejson.loads(input_dict['recjson'].encode('utf-8'))
     for name,value in recjson.iteritems():
-        value = value.strip().lower()
-        if name in DO_NOT_INDEX or value == '':
+        full_name = concepts.get_full_name(name)
+        if not full_name:
             continue
-        if concepts.is_short_name(name):
-            instance[name] = value
-        elif concepts.is_name(name):
-            instance[concepts.get_short_name(name)] = value
-
+        value = str(value).strip().lower()
+        if full_name in DO_NOT_INDEX or not value:
+            continue
+        instance[concepts.get_short_name(full_name)] = value
     return instance
-
