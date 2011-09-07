@@ -108,7 +108,6 @@ class DeltaProcessor(object):
             if source_id not in [x.lower() for x in reader.fieldnames]:
                 logging.critical('The source_id %s is required in csv file' % source_id)
                 sys.exit(1)
-            logging.info('Iterate')
             for row in reader:
                 if count >= batchsize:
                     self.totalcount += count
@@ -119,7 +118,6 @@ class DeltaProcessor(object):
                 row = dict((k.lower(), v) for k,v in row.iteritems()) # lowercase all keys
                 rows.append(row)
                 count += 1
-                logging.info('row %s' % row)
             if count > 0:
                 self.totalcount += count
                 self._insertchunk(rows, cursor)
