@@ -167,7 +167,9 @@ def get_corpus_list():
                    map(lambda x: [s.strip().lower() for s in x.split() if s], 
                        [val for key,val in recjson.iteritems() \
                             if key.strip().lower() not in DO_NOT_FULL_TEXT and \
-                            val.strip().lower() not in STOP_WORDS]))) # adds tokenized values      
+                            val.strip().lower() not in STOP_WORDS]), '')) # adds tokenized values      
+        if len(corpus) == 0:
+            return None
         return list(corpus)
     return wrapper
 

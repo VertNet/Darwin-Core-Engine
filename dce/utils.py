@@ -53,6 +53,9 @@ class UnicodeDictReader:
 
     def next(self):
         row = self.reader.next()
+        if len(row) == 0:
+            raise StopIteration
+        logging.info('row=%s' % row)
         vals = [unicode(s, "utf-8") for s in row]
         return dict((self.fieldnames[x], vals[x]) for x in range(len(self.fieldnames)))
 
