@@ -121,7 +121,8 @@ class ApiHandler(BaseHandler):
         def handle(cls, handler):
             params = cls.validate_request(handler.request)
             if not params:
-                cls.error(404)            
+                cls.error(404, handler)  
+                return
             m_key = str(params)
             logging.info('key=%s' %  m_key)
             response = memcache.get(m_key)
@@ -143,9 +144,9 @@ class ApiHandler(BaseHandler):
 
         @classmethod
         def validate_request(cls, request):
-            args = cls.get_dwc_args(request)
-            if len(args) == 0 and not request.get('q', None):
-                return False
+            args = cls.get_dwc_args(request)            
+            if len(args) == 0 and request.get('q', None) is None:
+                return None
             keywords = [x.lower() for x in request.get('q', '').split(',') if x]
             limit = request.get_range('limit', min_value=1, max_value=100, default=10)
             offset = request.get('offset', None)
