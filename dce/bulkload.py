@@ -40,6 +40,23 @@ from ndb import model
 # CouchDB modules
 import couchdb
 
+class AppEngineDatastore(object):
+    
+    def __init__(self, url):
+        self.url = url
+
+    def bulkload(self, kind, csv_file, config_file, config={}):
+        url = self.url
+        log_file = config.get('log_file', tempfile.NamedTemporaryFile(delete=False).name)
+        batch_size = config.get('batch_size', 10)
+        num_threads = config.get('num_threads', 1)
+        cmd = 'appcfg.py upload_data --log_file=%s --batch_size=%s --num_threads=%s --config_file=%s --filename=%s --kind %s --url=%s' 
+        cmdline = cmd % (log_file, batch_size, num_threads, config_file, csv_file, kind, url)
+        logging.info(cmdline)
+        args = shlex.split(cmdline)
+        subprocess.call(args, bufsize=-1)
+
+
 class Bulkload(object):
     def __init__(self, options):
         self.options = options

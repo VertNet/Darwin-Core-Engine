@@ -161,6 +161,9 @@ and deleted records."""))
         try:
             self.action(self)
         except Exception as e:
+            import traceback
+            traceback.print_tb(sys.exc_info()[2])
+            logging.info(e)
             raise e
         return 0
 

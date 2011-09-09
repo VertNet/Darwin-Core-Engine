@@ -17,6 +17,9 @@ handlers:
 - url: /api/.*
   script: app.py
 
+- url: /organizations(/.*)?
+  script: organizations.py
+
 # GitHub service hooks
 - url: /service-hooks/post-receive
   script: github_service_hooks.py 
